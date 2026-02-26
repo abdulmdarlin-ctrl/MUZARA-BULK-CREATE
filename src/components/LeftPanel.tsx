@@ -48,8 +48,16 @@ export function LeftPanel() {
 
   const [activeTab, setActiveTab] = useState<'data' | 'typography' | 'layout'>('data');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [fontSizeInput, setFontSizeInput] = useState('');
 
   const selectedField = fields.find(f => f.id === selectedFieldId);
+
+  // Sync fontSizeInput with selected field
+  useEffect(() => {
+    if (selectedField && selectedField.type !== 'image') {
+      setFontSizeInput(selectedField.fontSize.toString());
+    }
+  }, [selectedField]);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -1256,9 +1264,11 @@ export function LeftPanel() {
                     <label className="block text-[10px] text-gray-500 mb-1.5 font-medium">Size</label>
                     <input 
                       type="number" 
-                      value={isNaN(selectedField.fontSize) ? '' : selectedField.fontSize} 
+                      value={fontSizeInput}
                       onChange={(e) => {
                         const value = e.target.value;
+                        setFontSizeInput(value);
+                        // Only update field if value is valid
                         if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 0)) {
                           updateField(selectedField.id, { fontSize: value === '' ? 0 : parseInt(value) });
                         }
@@ -1266,6 +1276,7 @@ export function LeftPanel() {
                       onBlur={(e) => {
                         const value = parseInt(e.target.value);
                         if (isNaN(value) || value < 0) {
+                          setFontSizeInput('12');
                           updateField(selectedField.id, { fontSize: 12 });
                         }
                       }}
