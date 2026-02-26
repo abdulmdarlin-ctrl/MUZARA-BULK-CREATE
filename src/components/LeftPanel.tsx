@@ -1023,8 +1023,16 @@ export function LeftPanel() {
                 placeholder="All"
                 value={pagesToGenerate || ''}
                 onChange={(e) => {
-                  const val = parseInt(e.target.value);
-                  setPagesToGenerate(isNaN(val) || val < 1 ? null : val);
+                  const value = e.target.value;
+                  if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 1)) {
+                    setPagesToGenerate(value === '' ? null : parseInt(value));
+                  }
+                }}
+                onBlur={(e) => {
+                  const value = parseInt(e.target.value);
+                  if (isNaN(value) || value < 1) {
+                    setPagesToGenerate(null);
+                  }
                 }}
                 className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
               />
@@ -1097,7 +1105,18 @@ export function LeftPanel() {
                       <input 
                         type="number" 
                         value={isNaN(fromNumber) ? '' : fromNumber} 
-                        onChange={(e) => setNumbering(parseInt(e.target.value) || 0, toNumber, zeroPadding)}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 0)) {
+                            setNumbering(value === '' ? 0 : parseInt(value), toNumber, zeroPadding);
+                          }
+                        }}
+                        onBlur={(e) => {
+                          const value = parseInt(e.target.value);
+                          if (isNaN(value) || value < 0) {
+                            setNumbering(1, toNumber, zeroPadding);
+                          }
+                        }}
                         className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
                       />
                     </div>
@@ -1106,7 +1125,18 @@ export function LeftPanel() {
                       <input 
                         type="number" 
                         value={isNaN(toNumber) ? '' : toNumber} 
-                        onChange={(e) => setNumbering(fromNumber, parseInt(e.target.value) || 0, zeroPadding)}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 0)) {
+                            setNumbering(fromNumber, value === '' ? 0 : parseInt(value), zeroPadding);
+                          }
+                        }}
+                        onBlur={(e) => {
+                          const value = parseInt(e.target.value);
+                          if (isNaN(value) || value < 0) {
+                            setNumbering(fromNumber, 100, zeroPadding);
+                          }
+                        }}
                         className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
                       />
                     </div>
@@ -1115,7 +1145,18 @@ export function LeftPanel() {
                       <input 
                         type="number" 
                         value={isNaN(zeroPadding) ? '' : zeroPadding} 
-                        onChange={(e) => setNumbering(fromNumber, toNumber, parseInt(e.target.value) || 0)}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 0)) {
+                            setNumbering(fromNumber, toNumber, value === '' ? 0 : parseInt(value));
+                          }
+                        }}
+                        onBlur={(e) => {
+                          const value = parseInt(e.target.value);
+                          if (isNaN(value) || value < 0) {
+                            setNumbering(fromNumber, toNumber, 3);
+                          }
+                        }}
                         className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
                       />
                     </div>
@@ -1241,7 +1282,20 @@ export function LeftPanel() {
                     <input 
                       type="number" 
                       value={isNaN(selectedField.fontSize) ? '' : selectedField.fontSize} 
-                      onChange={(e) => updateField(selectedField.id, { fontSize: parseInt(e.target.value) || 0 })}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        // Only update if the input is valid or empty
+                        if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 0)) {
+                          updateField(selectedField.id, { fontSize: value === '' ? 0 : parseInt(value) });
+                        }
+                      }}
+                      onBlur={(e) => {
+                        // Ensure we have a valid number on blur
+                        const value = parseInt(e.target.value);
+                        if (isNaN(value) || value < 0) {
+                          updateField(selectedField.id, { fontSize: 12 });
+                        }
+                      }}
                       className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
                     />
                   </div>
@@ -1309,9 +1363,15 @@ export function LeftPanel() {
                     placeholder="Custom"
                     value={![1, 2, 4, 6].includes(leafletsPerPage) ? leafletsPerPage : ''}
                     onChange={(e) => {
-                      const val = parseInt(e.target.value);
-                      if (!isNaN(val) && val >= 1 && val <= 20) {
-                        setLayout(val, columns, rows, orientation);
+                      const value = e.target.value;
+                      if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 1 && parseInt(value) <= 20)) {
+                        setLayout(value === '' ? 1 : parseInt(value), columns, rows, orientation);
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const value = parseInt(e.target.value);
+                      if (isNaN(value) || value < 1 || value > 20) {
+                        setLayout(1, columns, rows, orientation);
                       }
                     }}
                     className="flex-1 bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
