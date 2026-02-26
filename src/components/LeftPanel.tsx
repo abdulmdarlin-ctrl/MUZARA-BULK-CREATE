@@ -552,6 +552,16 @@ export function LeftPanel() {
         } else if (leafletsPerPage === 6) {
           cols = 3;
           rows = 2;
+        } else {
+          // For custom numbers, calculate optimal grid
+          // Try to create a balanced grid (more columns than rows for better layout)
+          const sqrt = Math.sqrt(leafletsPerPage);
+          cols = Math.ceil(sqrt);
+          rows = Math.ceil(leafletsPerPage / cols);
+          
+          // Ensure we don't exceed reasonable limits
+          cols = Math.min(cols, 5);
+          rows = Math.min(rows, 4);
         }
         
         // Calculate available space per leaflet (accounting for binding margin on left)
@@ -569,11 +579,13 @@ export function LeftPanel() {
         
         // Calculate positions for each leaflet (centered in grid cells)
         // Numbering goes RIGHT TO LEFT: so we store positions in reverse column order
-        for (let row = 0; row < rows; row++) {
-          for (let col = cols - 1; col >= 0; col--) {
+        let leafletsGenerated = 0;
+        for (let row = 0; row < rows && leafletsGenerated < leafletsPerPage; row++) {
+          for (let col = cols - 1; col >= 0 && leafletsGenerated < leafletsPerPage; col--) {
             const x = bindingMargin + padding + col * (scaledWidth + padding) + (availableWidth - scaledWidth) / 2;
             const y = padding + row * (scaledHeight + padding) + (availableHeight - scaledHeight) / 2;
             positions.push({ x, y });
+            leafletsGenerated++;
           }
         }
       } else {
@@ -1289,11 +1301,34 @@ export function LeftPanel() {
                     </button>
                   ))}
                 </div>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    min="1"
+                    max="20"
+                    placeholder="Custom"
+                    value={![1, 2, 4, 6].includes(leafletsPerPage) ? leafletsPerPage : ''}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value);
+                      if (!isNaN(val) && val >= 1 && val <= 20) {
+                        setLayout(val, columns, rows, orientation);
+                      }
+                    }}
+                    className="flex-1 bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
+                  />
+                  <button
+                    onClick={() => setLayout(1, columns, rows, orientation)}
+                    className="px-2 py-1 bg-white/5 hover:bg-white/10 rounded text-xs text-gray-300"
+                  >
+                    Reset
+                  </button>
+                </div>
                 <p className="text-[10px] text-gray-500">
                   {leafletsPerPage === 1 && "Single leaflet per A4 page"}
-                  {leafletsPerPage === 2 && "2 leaflets stacked vertically"}
+                  {leafletsPerPage === 2 && "2 leaflets in 2x1 grid"}
                   {leafletsPerPage === 4 && "4 leaflets in 2x2 grid"}
-                  {leafletsPerPage === 6 && "6 leaflets in 2x3 grid"}
+                  {leafletsPerPage === 6 && "6 leaflets in 3x2 grid"}
+                  {![1, 2, 4, 6].includes(leafletsPerPage) && `${leafletsPerPage} custom leaflets per page`}
                 </p>
               </div>
               
