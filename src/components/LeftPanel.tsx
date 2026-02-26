@@ -372,57 +372,55 @@ export function LeftPanel() {
            pageWidth = width;
            pageHeight = height;
            
-           // For multi-leaflet layout, we need to embed the PDF as an image
+           // Convert PDF to image for drawing on pages
            // We'll use the PDF.js library to render it to a canvas first
-           if (leafletsPerPage > 1) {
-             try {
-               const pdfjsLib = await import('pdfjs-dist');
-               pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
-               
-               const loadingTask = pdfjsLib.getDocument({ data: fileBytes });
-               const pdfDocument = await loadingTask.promise;
-               const pdfPage = await pdfDocument.getPage(1);
-               
-               const viewport = pdfPage.getViewport({ scale: 2.0 });
-               const canvas = document.createElement('canvas');
-               canvas.width = viewport.width;
-               canvas.height = viewport.height;
-               const context = canvas.getContext('2d')!;
-               
-               await pdfPage.render({ 
-                canvasContext: context, 
-                viewport,
-                canvas: canvas as any
-              }).promise;
-               
-               // Convert canvas to PNG bytes
-               const pngData = canvas.toDataURL('image/png').split(',')[1];
-               let pngBytes = Uint8Array.from(atob(pngData), c => c.charCodeAt(0));
-               
-               // Apply grayscale if enabled for receipts
-               if (templateBlackAndWhite && bulkType === 'receipts') {
-                 try {
-                   const grayscaleResult = await convertToGrayscale(pngBytes.buffer.slice(0), 'image/png');
-                   pngBytes = new Uint8Array(grayscaleResult);
-                 } catch (e) {
-                   console.error('Failed to convert PDF template to grayscale:', e);
-                 }
+           try {
+             const pdfjsLib = await import('pdfjs-dist');
+             pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+             
+             const loadingTask = pdfjsLib.getDocument({ data: fileBytes });
+             const pdfDocument = await loadingTask.promise;
+             const pdfPage = await pdfDocument.getPage(1);
+             
+             const viewport = pdfPage.getViewport({ scale: 2.0 });
+             const canvas = document.createElement('canvas');
+             canvas.width = viewport.width;
+             canvas.height = viewport.height;
+             const context = canvas.getContext('2d')!;
+             
+             await pdfPage.render({ 
+              canvasContext: context, 
+              viewport,
+              canvas: canvas as any
+            }).promise;
+             
+             // Convert canvas to PNG bytes
+             const pngData = canvas.toDataURL('image/png').split(',')[1];
+             let pngBytes = Uint8Array.from(atob(pngData), c => c.charCodeAt(0));
+             
+             // Apply grayscale if enabled for receipts
+             if (templateBlackAndWhite && bulkType === 'receipts') {
+               try {
+                 const grayscaleResult = await convertToGrayscale(pngBytes.buffer.slice(0), 'image/png');
+                 pngBytes = new Uint8Array(grayscaleResult);
+               } catch (e) {
+                 console.error('Failed to convert PDF template to grayscale:', e);
                }
-               
-               templateImage = await outputPdf.embedPng(pngBytes);
-               
-               // Update dimensions to match the rendered image
-               pageWidth = viewport.width / 2; // Original size (not scaled)
-               pageHeight = viewport.height / 2;
-             } catch (e) {
-               console.error('Failed to convert PDF to image for multi-leaflet:', e);
              }
+             
+             templateImage = await outputPdf.embedPng(pngBytes);
+             
+             // Update dimensions to match the rendered image
+             pageWidth = viewport.width / 2; // Original size (not scaled)
+             pageHeight = viewport.height / 2;
+           } catch (e) {
+             console.error('Failed to convert PDF to image:', e);
            }
         } else if (templateFile.type.startsWith('image/')) {
            let imageBytes: Uint8Array;
            
-           // Apply grayscale if enabled
-           if (templateBlackAndWhite) {
+           // Apply grayscale if enabled for receipts
+           if (templateBlackAndWhite && bulkType === 'receipts') {
              try {
                const mimeType = templateFile.type === 'image/jpeg' ? 'image/jpeg' : 'image/png';
                const grayscaleBytes = await convertToGrayscale(fileBytes, mimeType);
@@ -819,11 +817,18 @@ export function LeftPanel() {
             const positionIndex = i % positions.length;
             const position = positions[positionIndex];
             
-            // Draw template image at this position if multi-leaflet
-            if (templateImage && leafletsPerPage > 1) {
+            // Draw template image at this position if available
+            if (templateImage) {
+              // For multi-leaflet, apply position offset
+              // For single leaflet, position is (0, 0)
+              const drawX = leafletsPerPage > 1 ? position.x : 0;
+              const drawY = leafletsPerPage > 1 
+                ? pageHeight - position.y - (leafletHeight * leafletScale)
+                : pageHeight - (leafletHeight * leafletScale);
+              
               page.drawImage(templateImage, {
-                x: position.x,
-                y: pageHeight - position.y - (leafletHeight * leafletScale),
+                x: drawX,
+                y: drawY,
                 width: leafletWidth * leafletScale,
                 height: leafletHeight * leafletScale,
               });
