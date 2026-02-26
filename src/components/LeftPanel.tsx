@@ -542,16 +542,16 @@ export function LeftPanel() {
         pageWidth = orientation === 'portrait' ? a4Width : a4Height;
         pageHeight = orientation === 'portrait' ? a4Height : a4Width;
         
-        // Calculate grid dimensions
+        // Calculate grid dimensions using rows-based logic
         if (leafletsPerPage === 2) {
-          cols = 1;
-          rows = 2;
+          cols = 2;
+          rows = 1;
         } else if (leafletsPerPage === 4) {
           cols = 2;
           rows = 2;
         } else if (leafletsPerPage === 6) {
-          cols = 2;
-          rows = 3;
+          cols = 3;
+          rows = 2;
         }
         
         // Calculate available space per leaflet (accounting for binding margin on left)
