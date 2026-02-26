@@ -81,6 +81,14 @@ export interface AppState {
   generatedPdfUrl: string | null;
   setGeneratedPdfUrl: (url: string | null) => void;
   
+  // Template Display
+  templateBlackAndWhite: boolean;
+  setTemplateBlackAndWhite: (enabled: boolean) => void;
+
+  // Page Generation Control
+  pagesToGenerate: number | null;
+  setPagesToGenerate: (pages: number | null) => void;
+
   // Migration
   onMount: () => void;
 }
@@ -146,7 +154,11 @@ export const useStore = create<AppState>()(
       generatedPdfUrl: null,
       setGeneratedPdfUrl: (url) => set({ generatedPdfUrl: url }),
       
-      // Migration: Update existing number fields to use P1, P2... instead of 0001, 0002...
+      templateBlackAndWhite: false,
+      setTemplateBlackAndWhite: (enabled) => set({ templateBlackAndWhite: enabled }),
+      
+      pagesToGenerate: null,
+      setPagesToGenerate: (pages) => set({ pagesToGenerate: pages }),
       onMount: () => {
         const state = useStore.getState();
         const updatedFields = state.fields.map((field, index) => {

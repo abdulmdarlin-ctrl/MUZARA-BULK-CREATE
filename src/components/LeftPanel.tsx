@@ -18,6 +18,8 @@ export function LeftPanel() {
     extractedImages = {}, setExtractedImages,
     canvasDimensions = { width: 500, height: 700 },
     pointCounter, setPointCounter,
+    templateBlackAndWhite, setTemplateBlackAndWhite,
+    pagesToGenerate, setPagesToGenerate,
     onMount
   } = useStore();
   
@@ -293,6 +295,62 @@ export function LeftPanel() {
   const handleGenerate = async () => {
     setIsGenerating(true);
     try {
+      // Helper function to convert image to grayscale
+      const convertToGrayscale = async (imageBytes: ArrayBuffer, mimeType: string): Promise<Uint8Array> => {
+        return new Promise((resolve, reject) => {
+          const img = new Image();
+          const blob = new Blob([imageBytes], { type: mimeType });
+          const url = URL.createObjectURL(blob);
+          
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d')!;
+            
+            // Draw image
+            ctx.drawImage(img, 0, 0);
+            
+            // Get image data and convert to grayscale
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            
+            for (let i = 0; i < data.length; i += 4) {
+              const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+              data[i] = gray;     // Red
+              data[i + 1] = gray; // Green
+              data[i + 2] = gray; // Blue
+              // Alpha (data[i + 3]) remains unchanged
+            }
+            
+            ctx.putImageData(imageData, 0, 0);
+            
+            // Convert to blob
+            canvas.toBlob((blob) => {
+              if (blob) {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                  const arrayBuffer = reader.result as ArrayBuffer;
+                  resolve(new Uint8Array(arrayBuffer));
+                };
+                reader.readAsArrayBuffer(blob);
+              } else {
+                reject(new Error('Failed to create blob'));
+              }
+            }, mimeType);
+            
+            URL.revokeObjectURL(url);
+          };
+          
+          img.onerror = () => {
+            URL.revokeObjectURL(url);
+            reject(new Error('Failed to load image'));
+          };
+          
+          img.src = url;
+        });
+      };
+
       // 1. Prepare the output PDF
       const outputPdf = await PDFDocument.create();
       
@@ -339,7 +397,18 @@ export function LeftPanel() {
                
                // Convert canvas to PNG bytes
                const pngData = canvas.toDataURL('image/png').split(',')[1];
-               const pngBytes = Uint8Array.from(atob(pngData), c => c.charCodeAt(0));
+               let pngBytes = Uint8Array.from(atob(pngData), c => c.charCodeAt(0));
+               
+               // Apply grayscale if enabled for receipts
+               if (templateBlackAndWhite && bulkType === 'receipts') {
+                 try {
+                   const grayscaleResult = await convertToGrayscale(pngBytes.buffer.slice(0), 'image/png');
+                   pngBytes = new Uint8Array(grayscaleResult);
+                 } catch (e) {
+                   console.error('Failed to convert PDF template to grayscale:', e);
+                 }
+               }
+               
                templateImage = await outputPdf.embedPng(pngBytes);
                
                // Update dimensions to match the rendered image
@@ -350,10 +419,26 @@ export function LeftPanel() {
              }
            }
         } else if (templateFile.type.startsWith('image/')) {
-           if (templateFile.type === 'image/jpeg') {
-             templateImage = await outputPdf.embedJpg(fileBytes);
+           let imageBytes: Uint8Array;
+           
+           // Apply grayscale if enabled
+           if (templateBlackAndWhite) {
+             try {
+               const mimeType = templateFile.type === 'image/jpeg' ? 'image/jpeg' : 'image/png';
+               const grayscaleBytes = await convertToGrayscale(fileBytes, mimeType);
+               imageBytes = grayscaleBytes;
+             } catch (e) {
+               console.error('Failed to convert image to grayscale:', e);
+               imageBytes = new Uint8Array(fileBytes);
+             }
            } else {
-             templateImage = await outputPdf.embedPng(fileBytes);
+             imageBytes = new Uint8Array(fileBytes);
+           }
+           
+           if (templateFile.type === 'image/jpeg') {
+             templateImage = await outputPdf.embedJpg(imageBytes);
+           } else {
+             templateImage = await outputPdf.embedPng(imageBytes);
            }
            // Use image dimensions for the page to ensure accurate mapping
            pageWidth = templateImage.width;
@@ -728,6 +813,8 @@ export function LeftPanel() {
             if (shouldLoopReceipts && currentNumber > toNumber) break;
             if (shouldLoopCertificates && csvRowIndex >= csvData.length) break;
             if (!shouldLoopReceipts && !shouldLoopCertificates && i > 0) break;
+            // Check pagesToGenerate limit
+            if (pagesToGenerate && leafletsDrawn >= pagesToGenerate * leafletsPerPage) break;
             
             const positionIndex = i % positions.length;
             const position = positions[positionIndex];
@@ -762,6 +849,8 @@ export function LeftPanel() {
         if (shouldLoopCertificates && csvRowIndex >= csvData.length) break;
         // Break if not looping (single page)
         if (!shouldLoopReceipts && !shouldLoopCertificates) break;
+        // Break if pagesToGenerate limit reached
+        if (pagesToGenerate && leafletsDrawn >= pagesToGenerate * leafletsPerPage) break;
         
       } while ((shouldLoopReceipts && currentNumber <= toNumber) || (shouldLoopCertificates && csvRowIndex < csvData.length));
 
@@ -883,6 +972,57 @@ export function LeftPanel() {
             )}
           </div>
         </div>
+
+        {/* Template Display Options */}
+        {templateUrl && bulkType === 'receipts' && (
+          <div className="space-y-3">
+            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Template Display</h2>
+            <button
+              onClick={() => setTemplateBlackAndWhite(!templateBlackAndWhite)}
+              className={clsx(
+                "w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-sm transition-colors",
+                templateBlackAndWhite
+                  ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20"
+                  : "bg-white/5 hover:bg-white/10 text-gray-300"
+              )}
+            >
+              <ImageIcon className="w-4 h-4" />
+              {templateBlackAndWhite ? 'Black & White: ON' : 'Black & White: OFF'}
+            </button>
+            <p className="text-xs text-gray-500">
+              Toggle to convert template to black & white. Mapping colors remain unchanged.
+            </p>
+          </div>
+        )}
+
+        {/* Page Generation Control */}
+        {templateUrl && bulkType === 'receipts' && (
+          <div className="space-y-3">
+            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Pages to Generate</h2>
+            <div className="flex gap-2">
+              <input
+                type="number"
+                min="1"
+                placeholder="All"
+                value={pagesToGenerate || ''}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value);
+                  setPagesToGenerate(isNaN(val) || val < 1 ? null : val);
+                }}
+                className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
+              />
+              <button
+                onClick={() => setPagesToGenerate(null)}
+                className="px-2 py-1 bg-white/5 hover:bg-white/10 rounded text-xs text-gray-300"
+              >
+                All
+              </button>
+            </div>
+            <p className="text-xs text-gray-500">
+              Leave empty to generate all pages. Set a number to limit output.
+            </p>
+          </div>
+        )}
 
         {/* Placement Mode */}
         {templateUrl && (

@@ -9,7 +9,7 @@ import { clsx } from 'clsx';
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
 export function CenterPanel() {
-  const { templateUrl, templateFile, fields, updateField, setSelectedFieldId, currentPage, setCurrentPage, extractedImages, setCanvasDimensions } = useStore();
+  const { templateUrl, templateFile, fields, updateField, setSelectedFieldId, currentPage, setCurrentPage, extractedImages, setCanvasDimensions, templateBlackAndWhite } = useStore();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [canvas, setCanvas] = useState<fabric.Canvas | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -230,6 +230,14 @@ export function CenterPanel() {
 
           const img = new fabric.Image(imgElement);
           
+          // Apply black and white filter if enabled
+          const { templateBlackAndWhite } = useStore.getState();
+          if (templateBlackAndWhite) {
+            const filter = new fabric.filters.Grayscale();
+            img.filters = [filter];
+            img.applyFilters();
+          }
+          
           // If it wasn't a PDF (so it was a direct image upload), calculate dimensions now
           if (templateFile.type !== 'application/pdf') {
              const ratio = (img.width || 1) / (img.height || 1);
@@ -288,7 +296,7 @@ export function CenterPanel() {
     };
 
     renderCanvas();
-  }, [canvas, templateUrl, templateFile, fields.length]);
+  }, [canvas, templateUrl, templateFile, fields.length, templateBlackAndWhite]);
 
   // Handle Interaction Mode Cursor
   useEffect(() => {
