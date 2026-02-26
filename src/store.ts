@@ -71,6 +71,7 @@ export interface AppState {
   interactionMode: 'select' | 'place_point';
   setInteractionMode: (mode: 'select' | 'place_point') => void;
   pointCounter: number;
+  setPointCounter: (count: number) => void;
 
   // Custom Fonts
   customFonts: { name: string; url: string; file: File }[];
@@ -79,6 +80,9 @@ export interface AppState {
   // Output
   generatedPdfUrl: string | null;
   setGeneratedPdfUrl: (url: string | null) => void;
+  
+  // Migration
+  onMount: () => void;
 }
 
 export const useStore = create<AppState>()(
@@ -134,12 +138,34 @@ export const useStore = create<AppState>()(
       interactionMode: 'select',
       setInteractionMode: (mode) => set({ interactionMode: mode }),
       pointCounter: 1,
+      setPointCounter: (count) => set({ pointCounter: count }),
 
       customFonts: [],
       addCustomFont: (font) => set((state) => ({ customFonts: [...state.customFonts, font] })),
-
+      
       generatedPdfUrl: null,
       setGeneratedPdfUrl: (url) => set({ generatedPdfUrl: url }),
+      
+      // Migration: Update existing number fields to use P1, P2... instead of 0001, 0002...
+      onMount: () => {
+        const state = useStore.getState();
+        const updatedFields = state.fields.map((field, index) => {
+          if (field.type === 'number' && field.value && field.value.match(/^\d+$/)) {
+            // Convert numeric values like "0001" to "P1", "0002" to "P2", etc.
+            const num = parseInt(field.value);
+            if (!isNaN(num)) {
+              return {
+                ...field,
+                value: `P${index + 1}`,
+                dataKey: `P${index + 1}`,
+                label: `P${index + 1}`
+              };
+            }
+          }
+          return field;
+        });
+        useStore.setState({ fields: updatedFields });
+      },
     }),
     {
       limit: 100, // Limit history to 100 steps

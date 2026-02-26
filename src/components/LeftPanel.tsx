@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import JSZip from 'jszip';
-import { useStore } from '../store';
+import { useStore, FieldConfig } from '../store';
 import { FileUp, FileText, Award, IdCard, Plus, Type, Hash, Image as ImageIcon, MousePointer2, Upload, Database, Layout, Zap, Download, Trash2, Undo2, Redo2, AlignLeft, AlignCenter, AlignRight } from 'lucide-react';
 import { clsx } from 'clsx';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
@@ -11,15 +11,22 @@ export function LeftPanel() {
   const { 
     bulkType, setBulkType, setTemplate, templateUrl, addField, interactionMode, setInteractionMode, addCustomFont,
     fromNumber, toNumber, zeroPadding, setNumbering,
-    setCsvData, csvHeaders, csvData,
-    fields, selectedFieldId, updateField, removeField,
+    setCsvData, csvHeaders, csvData = [],
+    fields = [], selectedFieldId, updateField, removeField,
     leafletsPerPage, columns, rows, orientation, setLayout,
     templateFile, customFonts, setGeneratedPdfUrl,
-    extractedImages, setExtractedImages,
-    canvasDimensions
+    extractedImages = {}, setExtractedImages,
+    canvasDimensions = { width: 500, height: 700 },
+    pointCounter, setPointCounter,
+    onMount
   } = useStore();
   
   const { undo, redo, pastStates, futureStates } = useStore.temporal.getState();
+
+  // Run migration on component mount
+  useEffect(() => {
+    onMount();
+  }, [onMount]);
 
   // Keyboard shortcuts for undo/redo
   useEffect(() => {
@@ -56,7 +63,11 @@ export function LeftPanel() {
       'image/*': ['.png', '.jpg', '.jpeg'],
       'application/pdf': ['.pdf']
     },
-    maxFiles: 1
+    maxFiles: 1,
+    multiple: false,
+    onDragEnter: () => {},
+    onDragOver: () => {},
+    onDragLeave: () => {}
   });
 
   const handleFontUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -80,15 +91,15 @@ export function LeftPanel() {
   };
 
   const handleAddField = (type: 'text' | 'number' | 'image') => {
-    // Ensure we are in select mode so the user can interact with the new field
+    // Ensure we are in select mode so user can interact with new field
     if (interactionMode !== 'select') {
       setInteractionMode('select');
     }
-
-    addField({
-      id: Math.random().toString(36).substr(2, 9),
+    
+    const newField: FieldConfig = {
+      id: `field-${Date.now()}`,
       type,
-      label: `New ${type}`,
+      label: type === 'number' ? `P${pointCounter}` : type === 'image' ? 'Photo' : 'Text',
       x: 50,
       y: 50,
       fontSize: 16,
@@ -96,10 +107,16 @@ export function LeftPanel() {
       color: '#000000',
       bold: false,
       align: 'left',
-      value: type === 'number' ? '0001' : 'Sample Text',
+      value: type === 'number' ? `P${pointCounter}` : 'Sample Text',
+      dataKey: type === 'number' ? `P${pointCounter}` : undefined,
       width: type === 'image' ? 100 : undefined,
       height: type === 'image' ? 100 : undefined,
-    });
+    };
+    
+    addField(newField);
+    if (type === 'number') {
+      setPointCounter(pointCounter + 1);
+    }
   };
 
   const handleDataUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -383,32 +400,39 @@ export function LeftPanel() {
       }
 
       // 4. Identify Fields
-      // Sort number fields by their ID (P1, P2, P3...) to respect creation order
-      const numberFields = fields
-        .filter(f => f.type === 'number')
-        .sort((a, b) => {
-          const numA = parseInt(a.dataKey?.replace('P', '') || '0');
-          const numB = parseInt(b.dataKey?.replace('P', '') || '0');
-          return numA - numB;
-        });
+      // Keep fields in their original order to match canvas positions
+      const numberFields = fields.filter(f => f.type === 'number');
       const staticFields = fields.filter(f => f.type !== 'number');
       
       // Helper function to draw placeholder for missing images
-      const drawImagePlaceholder = (page: any, position: { x: number, y: number }, field: any, fieldScale: number, pageHeight: number, helvetica: any) => {
+      const drawImagePlaceholder = (page: any, position: { x: number, y: number }, field: any, scaleX: number, scaleY: number, pageHeight: number, helvetica: any, isMultiLeaflet: boolean = false) => {
+        let rectX = field.x * scaleX;
+        let rectY = pageHeight - (field.y * scaleY) - ((field.height || 100) * scaleY);
+        let textX = field.x * scaleX + ((field.width || 100) * scaleX) / 2 - 15;
+        let textY = pageHeight - (field.y * scaleY) - ((field.height || 100) * scaleY) / 2;
+        
+        // For multi-leaflet, apply position offset
+        if (isMultiLeaflet) {
+          rectX += position.x;
+          rectY -= position.y;
+          textX += position.x;
+          textY -= position.y;
+        }
+        
         page.drawRectangle({
-          x: position.x + (field.x * fieldScale),
-          y: pageHeight - position.y - (field.y * fieldScale) - ((field.height || 100) * fieldScale),
-          width: (field.width || 100) * fieldScale,
-          height: (field.height || 100) * fieldScale,
+          x: rectX,
+          y: rectY,
+          width: (field.width || 100) * scaleX,
+          height: (field.height || 100) * scaleY,
           borderColor: rgb(0.8, 0.8, 0.8),
           borderWidth: 1,
           color: rgb(0.95, 0.95, 0.95),
         });
         
         page.drawText('[Photo]', {
-          x: position.x + (field.x * fieldScale) + ((field.width || 100) * fieldScale) / 2 - 15,
-          y: pageHeight - position.y - (field.y * fieldScale) - ((field.height || 100) * fieldScale) / 2,
-          size: 10 * fieldScale,
+          x: textX,
+          y: textY,
+          size: 10 * scaleY,
           font: helvetica,
           color: rgb(0.5, 0.5, 0.5),
         });
@@ -486,30 +510,48 @@ export function LeftPanel() {
         const canvasWidth = canvasDimensions.width;
         const canvasHeight = canvasDimensions.height;
         
-        // For single-leaflet (certificates): use 1:1 mapping - no scaling, just position offset
-        // For multi-leaflet (receipts): use scaling to fit leaflet into grid cell
+        // For single-leaflet (certificates/receipts with 1 per page): scale from canvas to PDF page
+        // For multi-leaflet (receipts with multiple per page): use scaling to fit leaflet into grid cell
         let scaleX: number, scaleY: number;
         
-        if (isMultiLeaflet) {
+        if (isMultiLeaflet && leafletsPerPage > 1) {
           // Multi-leaflet: scale down to fit in grid cell
           scaleX = (leafletWidth / canvasWidth) * scale;
           scaleY = (leafletHeight / canvasHeight) * scale;
         } else {
-          // Single-leaflet (certificates): 1:1 direct mapping
-          // Field at (x, y) on canvas should appear at same position on PDF
-          scaleX = 1;
-          scaleY = 1;
+          // Single-leaflet: scale from canvas to full PDF page
+          scaleX = pageWidth / canvasWidth;
+          scaleY = pageHeight / canvasHeight;
         }
+        
+        console.log('Coordinate mapping debug:', {
+          isMultiLeaflet,
+          canvasWidth,
+          canvasHeight,
+          pageWidth,
+          pageHeight,
+          scaleX,
+          scaleY,
+          bulkType
+        });
         
         // Get current data row for certificates
         const currentDataRow = shouldLoopCertificates ? csvData[dataRowIndex] : null;
         
-        // Draw Number Fields (Sequential)
-        for (const field of numberFields) {
+        // Draw Number Fields
+        // For receipts: each field (P1, P2, P3...) gets a unique sequential number
+        // P1 = currentNumber, P2 = currentNumber + 1, P3 = currentNumber + 2, etc.
+        for (let fieldIndex = 0; fieldIndex < numberFields.length; fieldIndex++) {
+          const field = numberFields[fieldIndex];
           let text = field.value || '';
           // For receipts, use the sequential number based on position
+          // For certificates, use sequential numbering 001-100
           if (shouldLoopReceipts) {
-            text = String(currentNumber + dataRowIndex).padStart(zeroPadding, '0');
+            // Each point field gets a unique number: P1=currentNumber, P2=currentNumber+1, etc.
+            text = String(currentNumber + fieldIndex).padStart(zeroPadding, '0');
+          } else if (shouldLoopCertificates) {
+            // For certificates, use sequential numbering from fromNumber
+            text = String(fromNumber + dataRowIndex).padStart(zeroPadding, '0');
           }
           
           // Get Font
@@ -527,7 +569,7 @@ export function LeftPanel() {
           const b = parseInt(hex.substring(4, 6), 16) / 255;
           
           const textWidth = font.widthOfTextAtSize(text, field.fontSize * scaleX);
-          let x = position.x + (field.x * scaleX);
+          let x = field.x * scaleX;
           
           if (field.align === 'center') {
             x += (field.width || 0) * scaleX / 2 - textWidth / 2;
@@ -536,9 +578,17 @@ export function LeftPanel() {
           }
           
           // Calculate Y: PDF Y is from bottom, Canvas Y is from top
-          // Account for text baseline - PDF draws from baseline, not top
-          const lineHeight = field.fontSize * scaleX * 1.2;
-          const y = pageHeight - position.y - (field.y * scaleY) - lineHeight;
+          // PDF draws from baseline, canvas Y is top of text - subtract to move up slightly
+          const baselineOffset = field.fontSize * scaleY * 0.25; // Adjust to match canvas position
+          let y = pageHeight - (field.y * scaleY) - baselineOffset;
+          
+          // For multi-leaflet, apply position offset
+          if (isMultiLeaflet) {
+            x += position.x;
+            y -= position.y;
+          }
+          
+          console.log(`Field ${field.dataKey}: canvas(${field.x}, ${field.y}) -> pdf(${x}, ${y})`);
           
           page.drawText(text, {
             x: x,
@@ -594,22 +644,31 @@ export function LeftPanel() {
                 
                 // Calculate dimensions maintaining aspect ratio
                 const imgWidth = (field.width || 100) * scaleX;
-                const imgHeight = (field.height || 120) * scaleX;
+                const imgHeight = (field.height || 120) * scaleY;
+                
+                let imgX = field.x * scaleX;
+                let imgY = pageHeight - (field.y * scaleY) - imgHeight;
+                
+                // For multi-leaflet, apply position offset
+                if (isMultiLeaflet) {
+                  imgX += position.x;
+                  imgY -= position.y;
+                }
                 
                 page.drawImage(embeddedImage, {
-                  x: position.x + (field.x * scaleX),
-                  y: pageHeight - position.y - (field.y * scaleY) - imgHeight,
+                  x: imgX,
+                  y: imgY,
                   width: imgWidth,
                   height: imgHeight,
                 });
               } catch (imgError) {
                 console.error('Error embedding image:', imgError);
                 // Fallback to placeholder
-                drawImagePlaceholder(page, position, field, scaleX, pageHeight, helvetica);
+                drawImagePlaceholder(page, position, field, scaleX, scaleY, pageHeight, helvetica, isMultiLeaflet);
               }
             } else {
               // Draw placeholder if image not found
-              drawImagePlaceholder(page, position, field, scaleX, pageHeight, helvetica);
+              drawImagePlaceholder(page, position, field, scaleX, scaleY, pageHeight, helvetica, isMultiLeaflet);
             }
             
             continue;
@@ -637,9 +696,9 @@ export function LeftPanel() {
           }
           
           // Calculate Y: PDF Y is from bottom, Canvas Y is from top
-          // Also account for text baseline - PDF draws from baseline, not top
-          const lineHeight = field.fontSize * scaleX * 1.2; // Approximate line height
-          const y = pageHeight - position.y - (field.y * scaleY) - lineHeight;
+          // PDF draws from baseline, canvas Y is top of text - subtract to move up slightly
+          const baselineOffset = field.fontSize * scaleY * 0.25;
+          const y = pageHeight - position.y - (field.y * scaleY) - baselineOffset;
           
           page.drawText(text, {
             x: x,
@@ -686,7 +745,8 @@ export function LeftPanel() {
             await drawLeaflet(page, position, leafletScale, leafletsDrawn, csvRowIndex);
             
             if (shouldLoopReceipts) {
-              currentNumber++;
+              // Increment by the number of fields per leaflet (e.g., 6 fields = +6)
+              currentNumber += numberFields.length;
             }
             if (shouldLoopCertificates) {
               csvRowIndex++;
@@ -706,7 +766,7 @@ export function LeftPanel() {
       } while ((shouldLoopReceipts && currentNumber <= toNumber) || (shouldLoopCertificates && csvRowIndex < csvData.length));
 
       const pdfBytes = await outputPdf.save();
-      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const blob = new Blob([pdfBytes as unknown as ArrayBuffer], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       setGeneratedPdfUrl(url);
     } catch (error) {
