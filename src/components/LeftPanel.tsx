@@ -9,20 +9,51 @@ import fontkit from '@pdf-lib/fontkit';
 
 export function LeftPanel() {
   // TabButton component
-  const TabButton = ({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) => (
-    <button
-      onClick={onClick}
-      className={clsx(
-        "flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg transition-all",
-        active
-          ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20"
-          : "text-gray-400 hover:text-white hover:bg-white/10"
-      )}
-    >
-      {icon}
-      {label}
-    </button>
-  );
+  const TabButton = ({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) => {
+    const [isHovered, setIsHovered] = useState(false);
+
+    return (
+      <button
+        onClick={onClick}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+        className={clsx(
+          "relative flex items-center gap-2 px-4 py-2.5 rounded-t-lg text-sm font-medium transition-all duration-200 ease-out whitespace-nowrap",
+          "transform hover:scale-105",
+          active 
+            ? "text-white bg-gradient-to-b from-white/10 to-white/5 border-t border-x border-white/20 shadow-lg" 
+            : "text-gray-400 hover:text-white hover:bg-white/5 border-t border-x border-transparent"
+        )}
+      >
+        {/* Hover Effect */}
+        {!active && isHovered && (
+          <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent rounded-t-lg" />
+        )}
+        
+        {/* Active State Glow */}
+        {active && (
+          <div className="absolute inset-0 bg-gradient-to-b from-blue-500/10 to-purple-500/10 rounded-t-lg" />
+        )}
+        
+        {/* Icon with Animation */}
+        <span className={clsx(
+          "transition-transform duration-200",
+          active ? "scale-110" : "scale-100",
+          isHovered && !active ? "rotate-12" : "rotate-0"
+        )}>
+          {icon}
+        </span>
+        
+        {/* Label */}
+        <span className="relative z-10">{label}</span>
+        
+        {/* Active Indicator Dot */}
+        {active && (
+          <div className="absolute -top-0.5 right-2 w-1.5 h-1.5 bg-gradient-to-r from-blue-400 to-purple-400 rounded-full animate-pulse" />
+        )}
+      </button>
+    );
+  };
 
   const { 
     bulkType, setBulkType, setTemplate, templateUrl, addField, interactionMode, setInteractionMode, addCustomFont,
@@ -1672,6 +1703,8 @@ export function LeftPanel() {
               </div>
             </div>
           )}
+            </div>
+        </div>
         </div>
 
         {/* Generate Button */}
@@ -1686,68 +1719,5 @@ export function LeftPanel() {
 
       </div>
     </div>
-  );
-}
-
-function TabButton({ active, onClick, icon, label }: { active: boolean, onClick: () => void, icon: React.ReactNode, label: string }) {
-  const [isHovered, setIsHovered] = useState(false);
-
-  return (
-    <button
-      onClick={onClick}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      className={clsx(
-        "relative flex items-center gap-2 px-4 py-2.5 rounded-t-lg text-sm font-medium transition-all duration-200 ease-out whitespace-nowrap",
-        "transform hover:scale-105",
-        active 
-          ? "text-white bg-gradient-to-b from-white/10 to-white/5 border-t border-x border-white/20 shadow-lg" 
-          : "text-gray-400 hover:text-white hover:bg-white/5 border-t border-x border-transparent"
-      )}
-    >
-      {/* Hover Effect */}
-      {!active && isHovered && (
-        <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent rounded-t-lg" />
-      )}
-      
-      {/* Active State Glow */}
-      {active && (
-        <div className="absolute inset-0 bg-gradient-to-b from-blue-500/10 to-purple-500/10 rounded-t-lg" />
-      )}
-      
-      {/* Icon with Animation */}
-      <span className={clsx(
-        "transition-transform duration-200",
-        active ? "scale-110" : "scale-100",
-        isHovered && !active ? "rotate-12" : "rotate-0"
-      )}>
-        {icon}
-      </span>
-      
-      {/* Label */}
-      <span className="relative z-10">{label}</span>
-      
-      {/* Active Indicator Dot */}
-      {active && (
-        <div className="absolute -top-0.5 right-2 w-1.5 h-1.5 bg-gradient-to-r from-blue-400 to-purple-400 rounded-full animate-pulse" />
-      )}
-    </button>
-  );
-}
-
-function TypeButton({ active, onClick, icon, label }: { active: boolean, onClick: () => void, icon: React.ReactNode, label: string }) {
-  return (
-    <button
-      onClick={onClick}
-      className={clsx(
-        "flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200",
-        active 
-          ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" 
-          : "bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white"
-      )}
-    >
-      {icon}
-      {label}
-    </button>
   );
 }
