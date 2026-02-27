@@ -134,7 +134,7 @@ export const useStore = create<AppState>()(
       canvasDimensions: { width: 500, height: 700 },
       setCanvasDimensions: (dimensions) => set({ canvasDimensions: dimensions }),
 
-      leafletsPerPage: 1,
+      leafletsPerPage: 6,
       columns: 1,
       rows: 1,
       orientation: 'portrait',

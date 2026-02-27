@@ -618,8 +618,8 @@ export function LeftPanel() {
           cols = 2;
           rows = 2;
         } else if (leafletsPerPage === 6) {
-          cols = 3;
-          rows = 2;
+          cols = 2;
+          rows = 3;
         } else {
           // For custom numbers, calculate optimal grid
           // Try to create a balanced grid (more columns than rows for better layout)
@@ -1665,7 +1665,7 @@ export function LeftPanel() {
                   {leafletsPerPage === 1 && "Single leaflet per A4 page"}
                   {leafletsPerPage === 2 && "2 leaflets in 2x1 grid"}
                   {leafletsPerPage === 4 && "4 leaflets in 2x2 grid"}
-                  {leafletsPerPage === 6 && "6 leaflets in 3x2 grid"}
+                  {leafletsPerPage === 6 && "6 leaflets in 2x3 grid"}
                   {![1, 2, 4, 6].includes(leafletsPerPage) && `${leafletsPerPage} custom leaflets per page`}
                 </p>
               </div>
