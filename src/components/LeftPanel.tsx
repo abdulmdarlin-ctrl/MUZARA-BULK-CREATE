@@ -1188,14 +1188,7 @@ export function LeftPanel() {
           {/* Tab Content with Enhanced Transitions */}
           <div className="relative min-h-[400px] overflow-hidden">
             {/* Data Tab Content */}
-            <div 
-              className={clsx(
-                "transition-all duration-300 ease-out",
-                activeTab === 'data' 
-                  ? "opacity-100 translate-x-0" 
-                  : "opacity-0 absolute inset-0 -translate-x-full pointer-events-none"
-              )}
-            >
+            <div>
               {activeTab === 'data' && (
                 <div className="space-y-4">
                   {bulkType === 'receipts' && (
@@ -1323,14 +1316,7 @@ export function LeftPanel() {
             </div>
 
             {/* Typography Tab Content */}
-            <div 
-              className={clsx(
-                "transition-all duration-300 ease-out",
-                activeTab === 'typography' 
-                  ? "opacity-100 translate-x-0" 
-                  : "opacity-0 absolute inset-0 translate-x-full pointer-events-none"
-              )}
-            >
+            <div>
               {activeTab === 'typography' && (
             <div className="space-y-4">
               {selectedField ? (
@@ -1609,14 +1595,7 @@ export function LeftPanel() {
           )}
 
           {activeTab === 'layout' && (
-            <div 
-              className={clsx(
-                "transition-all duration-300 ease-out",
-                activeTab === 'layout' 
-                  ? "opacity-100 translate-x-0" 
-                  : "opacity-0 absolute inset-0 translate-x-full pointer-events-none"
-              )}
-            >
+            <div>
               {activeTab === 'layout' && (
                 <div className="space-y-4">
                   <h3 className="text-xs font-semibold text-gray-300 flex items-center gap-2">
