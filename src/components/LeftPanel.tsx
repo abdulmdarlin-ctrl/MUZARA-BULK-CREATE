@@ -2,12 +2,28 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import JSZip from 'jszip';
 import { useStore, FieldConfig } from '../store';
-import { FileUp, FileText, Award, IdCard, Plus, Type, Hash, Image as ImageIcon, MousePointer2, Upload, Database, Layout, Zap, Download, Trash2, Undo2, Redo2, AlignLeft, AlignCenter, AlignRight, Bold, Minus } from 'lucide-react';
+import { FileUp, FileText, Award, IdCard, Plus, Hash, Image as ImageIcon, MousePointer2, Upload, Database, Layout, Zap, Download, Trash2, Undo2, Redo2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 
 export function LeftPanel() {
+  // TabButton component
+  const TabButton = ({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) => (
+    <button
+      onClick={onClick}
+      className={clsx(
+        "flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg transition-all",
+        active
+          ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20"
+          : "text-gray-400 hover:text-white hover:bg-white/10"
+      )}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+
   const { 
     bulkType, setBulkType, setTemplate, templateUrl, addField, interactionMode, setInteractionMode, addCustomFont,
     fromNumber, toNumber, zeroPadding, setNumbering,
@@ -33,6 +49,12 @@ export function LeftPanel() {
   // Keyboard shortcuts for undo/redo
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle shortcuts when not typing in an input
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.contentEditable === 'true') {
+        return;
+      }
+      
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
         e.preventDefault();
         undo();
@@ -46,7 +68,7 @@ export function LeftPanel() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [undo, redo]);
 
-  const [activeTab, setActiveTab] = useState<'data' | 'typography' | 'layout'>('data');
+  const [activeTab, setActiveTab] = useState<'data' | 'layout'>('data');
   const [isGenerating, setIsGenerating] = useState(false);
 
   const selectedField = fields.find(f => f.id === selectedFieldId);
@@ -1086,7 +1108,6 @@ export function LeftPanel() {
         <div className="space-y-4 pt-4 border-t border-white/10">
           <div className="flex gap-2 border-b border-white/10 pb-2 overflow-x-auto">
             <TabButton active={activeTab === 'data'} onClick={() => setActiveTab('data')} icon={<Database className="w-3 h-3" />} label="Data" />
-            <TabButton active={activeTab === 'typography'} onClick={() => setActiveTab('typography')} icon={<Type className="w-3 h-3" />} label="Type" />
             {bulkType === 'receipts' && (
               <TabButton active={activeTab === 'layout'} onClick={() => setActiveTab('layout')} icon={<Layout className="w-3 h-3" />} label="Layout" />
             )}
@@ -1217,118 +1238,6 @@ export function LeftPanel() {
             </div>
           )}
 
-          {activeTab === 'typography' && selectedField && (
-            <div className="space-y-3">
-              <h3 className="text-xs font-semibold text-gray-300 flex items-center gap-2">
-                <Type className="w-3 h-3 text-blue-400" /> Typography
-              </h3>
-              <div className="space-y-2">
-                <div>
-                  <label className="block text-[10px] text-gray-500 mb-1">Font</label>
-                  <select 
-                    value={selectedField.fontFamily} 
-                    onChange={(e) => updateField(selectedField.id, { fontFamily: e.target.value })}
-                    className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
-                  >
-                    <option value="CrashNumberingSerif">CrashNumberingSerif</option>
-                    <option value="Helvetica">Helvetica</option>
-                    <option value="Times New Roman">Times New Roman</option>
-                    <option value="Courier New">Courier New</option>
-                    {customFonts.map(font => (
-                      <option key={font.name} value={font.name}>{font.name}</option>
-                    ))}
-                  </select>
-                </div>
-                
-                <div>
-                  <label className="block text-[10px] text-gray-500 mb-1">Alignment</label>
-                  <div className="flex bg-black/50 border border-white/10 rounded overflow-hidden">
-                    <button
-                      onClick={() => updateField(selectedField.id, { align: 'left' })}
-                      className={clsx(
-                        "flex-1 py-1 flex items-center justify-center hover:bg-white/5 transition-colors",
-                        selectedField.align === 'left' ? "bg-white/10 text-white" : "text-gray-400"
-                      )}
-                      title="Align Left"
-                    >
-                      <AlignLeft className="w-3 h-3" />
-                    </button>
-                    <button
-                      onClick={() => updateField(selectedField.id, { align: 'center' })}
-                      className={clsx(
-                        "flex-1 py-1 flex items-center justify-center hover:bg-white/5 transition-colors border-l border-r border-white/5",
-                        selectedField.align === 'center' ? "bg-white/10 text-white" : "text-gray-400"
-                      )}
-                      title="Align Center"
-                    >
-                      <AlignCenter className="w-3 h-3" />
-                    </button>
-                    <button
-                      onClick={() => updateField(selectedField.id, { align: 'right' })}
-                      className={clsx(
-                        "flex-1 py-1 flex items-center justify-center hover:bg-white/5 transition-colors",
-                        selectedField.align === 'right' ? "bg-white/10 text-white" : "text-gray-400"
-                      )}
-                      title="Align Right"
-                    >
-                      <AlignRight className="w-3 h-3" />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-[10px] text-gray-500 mb-1">Size</label>
-                    <input 
-                      type="number" 
-                      value={isNaN(selectedField.fontSize) ? '' : selectedField.fontSize} 
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        // Only update if the input is valid or empty
-                        if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 0)) {
-                          updateField(selectedField.id, { fontSize: value === '' ? 0 : parseInt(value) });
-                        }
-                      }}
-                      onBlur={(e) => {
-                        // Ensure we have a valid number on blur
-                        const value = parseInt(e.target.value);
-                        if (isNaN(value) || value < 0) {
-                          updateField(selectedField.id, { fontSize: 12 });
-                        }
-                      }}
-                      className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] text-gray-500 mb-1">Color</label>
-                    <input 
-                      type="color" 
-                      value={selectedField.color} 
-                      onChange={(e) => updateField(selectedField.id, { color: e.target.value })}
-                      className="w-full h-6 bg-black/50 border border-white/10 rounded cursor-pointer"
-                    />
-                  </div>
-                </div>
-                <button
-                  onClick={() => updateField(selectedField.id, { bold: !selectedField.bold })}
-                  className={clsx(
-                    "w-full py-1 rounded text-xs font-medium transition-colors border",
-                    selectedField.bold 
-                      ? "bg-blue-600 border-blue-500 text-white" 
-                      : "bg-black/50 border-white/10 text-gray-400 hover:text-white"
-                  )}
-                >
-                  Bold
-                </button>
-                <button
-                  onClick={() => removeField(selectedField.id)}
-                  className="w-full py-1 rounded text-xs font-medium transition-colors border bg-red-500/10 border-red-500/50 text-red-400 hover:bg-red-500/20 hover:text-red-300 mt-2 flex items-center justify-center gap-2"
-                >
-                  <Trash2 className="w-3 h-3" /> Remove Field
-                </button>
-              </div>
-            </div>
-          )}
 
           {activeTab === 'layout' && (
             <div className="space-y-4">
