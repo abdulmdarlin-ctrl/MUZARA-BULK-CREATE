@@ -1261,14 +1261,22 @@ export function LeftPanel() {
                   {/* Quick Actions */}
                   <div className="grid grid-cols-2 gap-2">
                     <button
-                      onClick={() => updateField(selectedField.id, { fontSize: selectedField.fontSize + 1 })}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        updateField(selectedField.id, { fontSize: selectedField.fontSize + 1 });
+                      }}
                       className="flex items-center justify-center gap-2 py-2 px-3 bg-white/5 hover:bg-white/10 rounded-lg text-xs transition-all"
                     >
                       <Plus className="w-3 h-3" />
                       Increase Size
                     </button>
                     <button
-                      onClick={() => updateField(selectedField.id, { fontSize: Math.max(1, selectedField.fontSize - 1) })}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        updateField(selectedField.id, { fontSize: Math.max(1, selectedField.fontSize - 1) });
+                      }}
                       className="flex items-center justify-center gap-2 py-2 px-3 bg-white/5 hover:bg-white/10 rounded-lg text-xs transition-all"
                     >
                       <Minus className="w-3 h-3" />
@@ -1340,7 +1348,11 @@ export function LeftPanel() {
                     <label className="block text-[10px] text-gray-500 mb-1.5 font-medium">Alignment</label>
                     <div className="grid grid-cols-3 gap-1">
                       <button
-                        onClick={() => updateField(selectedField.id, { align: 'left' })}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          updateField(selectedField.id, { align: 'left' });
+                        }}
                         className={clsx(
                           "py-2 flex items-center justify-center rounded-lg text-xs font-medium transition-all border",
                           selectedField.align === 'left' 
@@ -1351,7 +1363,11 @@ export function LeftPanel() {
                         <AlignLeft className="w-3 h-3" />
                       </button>
                       <button
-                        onClick={() => updateField(selectedField.id, { align: 'center' })}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          updateField(selectedField.id, { align: 'center' });
+                        }}
                         className={clsx(
                           "py-2 flex items-center justify-center rounded-lg text-xs font-medium transition-all border",
                           selectedField.align === 'center' 
@@ -1362,7 +1378,11 @@ export function LeftPanel() {
                         <AlignCenter className="w-3 h-3" />
                       </button>
                       <button
-                        onClick={() => updateField(selectedField.id, { align: 'right' })}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          updateField(selectedField.id, { align: 'right' });
+                        }}
                         className={clsx(
                           "py-2 flex items-center justify-center rounded-lg text-xs font-medium transition-all border",
                           selectedField.align === 'right' 
@@ -1380,7 +1400,11 @@ export function LeftPanel() {
                     <label className="block text-[10px] text-gray-500 mb-1.5 font-medium">Style</label>
                     <div className="grid grid-cols-2 gap-2">
                       <button
-                        onClick={() => updateField(selectedField.id, { bold: !selectedField.bold })}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          updateField(selectedField.id, { bold: !selectedField.bold });
+                        }}
                         className={clsx(
                           "py-2 flex items-center justify-center rounded-lg text-xs font-medium transition-all border",
                           selectedField.bold 
@@ -1392,13 +1416,17 @@ export function LeftPanel() {
                         {selectedField.bold ? 'Bold' : 'Regular'}
                       </button>
                       <button
-                        onClick={() => updateField(selectedField.id, { 
-                          fontFamily: 'CrashNumberingSerif',
-                          fontSize: 16,
-                          color: '#000000',
-                          bold: false,
-                          align: 'left'
-                        })}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          updateField(selectedField.id, { 
+                            fontFamily: 'CrashNumberingSerif',
+                            fontSize: 16,
+                            color: '#000000',
+                            bold: false,
+                            align: 'left'
+                          });
+                        }}
                         className="py-2 px-3 bg-gray-600 hover:bg-gray-500 rounded-lg text-xs text-white transition-colors"
                       >
                         Reset to Default
