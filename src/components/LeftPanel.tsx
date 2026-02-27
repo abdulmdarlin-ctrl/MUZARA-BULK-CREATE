@@ -961,19 +961,17 @@ export function LeftPanel() {
             <div className="flex gap-1">
               <button 
                 onClick={() => undo()} 
-                className="relative p-2 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-all duration-200 transform hover:scale-105 group"
+                className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white"
                 title="Undo (Ctrl+Z)"
               >
-                <Undo2 className="w-4 h-4 transition-transform duration-200 group-hover:rotate-[-12deg]" />
-                <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+                <Undo2 className="w-4 h-4" />
               </button>
               <button 
                 onClick={() => redo()} 
-                className="relative p-2 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-all duration-200 transform hover:scale-105 group"
+                className="p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white"
                 title="Redo (Ctrl+Y)"
               >
-                <Redo2 className="w-4 h-4 transition-transform duration-200 group-hover:rotate-12" />
-                <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+                <Redo2 className="w-4 h-4" />
               </button>
             </div>
           </div>
@@ -981,20 +979,14 @@ export function LeftPanel() {
             <button 
               onClick={() => setBulkType('receipts')}
               className={clsx(
-                "relative flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 transform hover:scale-105 overflow-hidden group",
+                "flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200",
                 bulkType === 'receipts'
-                  ? "bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-lg shadow-blue-500/20" 
+                  ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" 
                   : "bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white"
               )}
             >
-              {bulkType === 'receipts' && (
-                <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-xl" />
-              )}
-              {bulkType !== 'receipts' && (
-                <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
-              )}
-              <FileText className="w-5 h-5 relative z-10 transition-transform duration-200 group-hover:scale-110" />
-              <div className="text-left relative z-10">
+              <FileText className="w-5 h-5" />
+              <div className="text-left">
                 <div className="font-medium">Receipt Books</div>
                 <div className="text-[10px] opacity-70">Numbered receipts with sequential numbering</div>
               </div>
@@ -1002,20 +994,14 @@ export function LeftPanel() {
             <button 
               onClick={() => setBulkType('certificates')}
               className={clsx(
-                "relative flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 transform hover:scale-105 overflow-hidden group",
+                "flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200",
                 bulkType === 'certificates'
-                  ? "bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-lg shadow-blue-500/20" 
+                  ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" 
                   : "bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white"
               )}
             >
-              {bulkType === 'certificates' && (
-                <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-xl" />
-              )}
-              {bulkType !== 'certificates' && (
-                <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
-              )}
-              <Award className="w-5 h-5 relative z-10 transition-transform duration-200 group-hover:scale-110" />
-              <div className="text-left relative z-10">
+              <Award className="w-5 h-5" />
+              <div className="text-left">
                 <div className="font-medium">Certificates</div>
                 <div className="text-[10px] opacity-70">Certificates with photo placeholders</div>
               </div>
@@ -1023,20 +1009,14 @@ export function LeftPanel() {
             <button 
               onClick={() => setBulkType('idcards')}
               className={clsx(
-                "relative flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 transform hover:scale-105 overflow-hidden group",
+                "flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200",
                 bulkType === 'idcards'
-                  ? "bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-lg shadow-blue-500/20" 
+                  ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" 
                   : "bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white"
               )}
             >
-              {bulkType === 'idcards' && (
-                <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-xl" />
-              )}
-              {bulkType !== 'idcards' && (
-                <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
-              )}
-              <IdCard className="w-5 h-5 relative z-10 transition-transform duration-200 group-hover:scale-110" />
-              <div className="text-left relative z-10">
+              <IdCard className="w-5 h-5" />
+              <div className="text-left">
                 <div className="font-medium">ID Cards</div>
                 <div className="text-[10px] opacity-70">ID cards with photo placeholders</div>
               </div>
@@ -1731,14 +1711,10 @@ export function LeftPanel() {
         <button 
           onClick={handleGenerate}
           disabled={isGenerating || !templateUrl}
-          className="relative w-full bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-500/20 transition-all duration-200 transform hover:scale-105 disabled:hover:scale-100 flex items-center justify-center gap-3 text-sm overflow-hidden group"
+          className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 rounded-xl shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center gap-2 text-sm"
         >
-          <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
-          <Zap className="w-5 h-5 relative z-10 transition-transform duration-200 group-hover:scale-110 group-hover:rotate-12" />
-          <span className="relative z-10">{isGenerating ? 'Generating...' : 'Generate PDF'}</span>
-          {isGenerating && (
-            <div className="absolute inset-0 bg-white/10 rounded-xl animate-pulse" />
-          )}
+          <Zap className="w-4 h-4" />
+          {isGenerating ? 'Generating...' : 'Generate PDF'}
         </button>
 
       </div>
