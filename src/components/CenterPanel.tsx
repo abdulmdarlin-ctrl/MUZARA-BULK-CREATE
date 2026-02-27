@@ -71,8 +71,8 @@ export function CenterPanel() {
     // Event Listeners
     c.on('object:modified', (e) => {
       const obj = e.target;
-      if (obj && obj.id) {
-        updateField(obj.id as string, {
+      if (obj && (obj as any).id) {
+        updateField((obj as any).id as string, {
           x: obj.left || 0,
           y: obj.top || 0,
           width: obj.scaleX ? (obj.width || 0) * obj.scaleX : obj.width,
@@ -83,13 +83,13 @@ export function CenterPanel() {
 
     c.on('selection:created', (e) => {
       if (e.selected && e.selected.length > 0) {
-        setSelectedFieldId(e.selected[0].id as string);
+        setSelectedFieldId((e.selected[0] as any).id as string);
       }
     });
 
     c.on('selection:updated', (e) => {
       if (e.selected && e.selected.length > 0) {
-        setSelectedFieldId(e.selected[0].id as string);
+        setSelectedFieldId((e.selected[0] as any).id as string);
       }
     });
 
@@ -102,7 +102,7 @@ export function CenterPanel() {
       const { interactionMode, pointCounter, addField, bulkType, zeroPadding, fromNumber } = useStore.getState();
       
       // Fabric v6 uses scenePoint instead of pointer
-      const pointer = e.scenePoint || e.pointer;
+      const pointer = (e as any).scenePoint || (e as any).pointer;
 
       if (interactionMode === 'place_point' && pointer) {
         const id = `P${pointCounter}`;
@@ -200,7 +200,8 @@ export function CenterPanel() {
               if (context) {
                 await page.render({
                   canvasContext: context,
-                  viewport: viewport
+                  viewport: viewport,
+                  canvas: canvasEl
                 }).promise;
                 imageSrc = canvasEl.toDataURL('image/png');
                 
@@ -357,7 +358,8 @@ export function CenterPanel() {
               if (context) {
                 await page.render({
                   canvasContext: context,
-                  viewport: viewport
+                  viewport: viewport,
+                  canvas: canvasEl
                 }).promise;
                 imageSrc = canvasEl.toDataURL('image/png');
               }

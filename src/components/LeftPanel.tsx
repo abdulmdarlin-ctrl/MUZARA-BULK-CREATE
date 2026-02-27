@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import JSZip from 'jszip';
 import { useStore, FieldConfig } from '../store';
-import { FileUp, FileText, Award, IdCard, Plus, Type, Hash, Image as ImageIcon, MousePointer2, Upload, Database, Layout, Zap, Download, Trash2, Undo2, Redo2, AlignLeft, AlignCenter, AlignRight } from 'lucide-react';
+import { FileUp, FileText, Award, IdCard, Plus, Type, Hash, Image as ImageIcon, MousePointer2, Upload, Database, Layout, Zap, Download, Trash2, Undo2, Redo2, AlignLeft, AlignCenter, AlignRight, Bold, Minus } from 'lucide-react';
 import { clsx } from 'clsx';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
