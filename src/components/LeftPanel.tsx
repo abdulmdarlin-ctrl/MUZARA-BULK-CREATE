@@ -28,7 +28,7 @@ export function LeftPanel() {
     bulkType, setBulkType, setTemplate, templateUrl, addField, interactionMode, setInteractionMode, addCustomFont,
     fromNumber, toNumber, zeroPadding, setNumbering,
     setCsvData, csvHeaders, csvData = [],
-    fields = [], selectedFieldId, updateField, removeField,
+    fields = [], selectedFieldId, setSelectedFieldId, updateField, removeField,
     leafletsPerPage, columns, rows, orientation, setLayout,
     templateFile, customFonts, setGeneratedPdfUrl,
     extractedImages = {}, setExtractedImages,
@@ -68,10 +68,25 @@ export function LeftPanel() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [undo, redo]);
 
-  const [activeTab, setActiveTab] = useState<'data' | 'layout'>('data');
+  const [activeTab, setActiveTab] = useState<'data' | 'typography' | 'layout'>('data');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [lastSelectedFieldId, setLastSelectedFieldId] = useState<string | null>(null);
 
   const selectedField = fields.find(f => f.id === selectedFieldId);
+
+  // Maintain last selected field when in typography tab
+  useEffect(() => {
+    if (selectedFieldId && activeTab === 'typography') {
+      setLastSelectedFieldId(selectedFieldId);
+    }
+  }, [selectedFieldId, activeTab]);
+
+  // Restore field selection when switching back to typography tab
+  useEffect(() => {
+    if (activeTab === 'typography' && lastSelectedFieldId && !selectedFieldId) {
+      setSelectedFieldId(lastSelectedFieldId);
+    }
+  }, [activeTab, lastSelectedFieldId, selectedFieldId]);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -1264,7 +1279,13 @@ export function LeftPanel() {
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        updateField(selectedField.id, { fontSize: selectedField.fontSize + 1 });
+                        // Ensure typography tab stays active and field remains selected
+                        if (activeTab !== 'typography') setActiveTab('typography');
+                        if (selectedField) {
+                          updateField(selectedField.id, { fontSize: selectedField.fontSize + 1 });
+                          // Re-select field to ensure it stays selected
+                          setSelectedFieldId(selectedField.id);
+                        }
                       }}
                       className="flex items-center justify-center gap-2 py-2 px-3 bg-white/5 hover:bg-white/10 rounded-lg text-xs transition-all"
                     >
@@ -1275,7 +1296,13 @@ export function LeftPanel() {
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        updateField(selectedField.id, { fontSize: Math.max(1, selectedField.fontSize - 1) });
+                        // Ensure typography tab stays active and field remains selected
+                        if (activeTab !== 'typography') setActiveTab('typography');
+                        if (selectedField) {
+                          updateField(selectedField.id, { fontSize: Math.max(1, selectedField.fontSize - 1) });
+                          // Re-select field to ensure it stays selected
+                          setSelectedFieldId(selectedField.id);
+                        }
                       }}
                       className="flex items-center justify-center gap-2 py-2 px-3 bg-white/5 hover:bg-white/10 rounded-lg text-xs transition-all"
                     >
@@ -1290,7 +1317,13 @@ export function LeftPanel() {
                       <label className="block text-[10px] text-gray-500 mb-1.5 font-medium">Font Family</label>
                       <select 
                         value={selectedField.fontFamily} 
-                        onChange={(e) => updateField(selectedField.id, { fontFamily: e.target.value })}
+                        onChange={(e) => {
+                          updateField(selectedField.id, { fontFamily: e.target.value });
+                          setSelectedFieldId(selectedField.id);
+                        }}
+                        onFocus={() => {
+                          if (activeTab !== 'typography') setActiveTab('typography');
+                        }}
                         className="w-full bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-blue-500/50 transition-colors"
                       >
                         <option value="CrashNumberingSerif">CrashNumberingSerif</option>
@@ -1313,13 +1346,18 @@ export function LeftPanel() {
                             const value = e.target.value;
                             if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 0)) {
                               updateField(selectedField.id, { fontSize: value === '' ? 0 : parseInt(value) });
+                              setSelectedFieldId(selectedField.id);
                             }
+                          }}
+                          onFocus={() => {
+                            if (activeTab !== 'typography') setActiveTab('typography');
                           }}
                           onBlur={(e) => {
                             const value = parseInt(e.target.value);
                             if (isNaN(value) || value < 0) {
                               updateField(selectedField.id, { fontSize: 12 });
                             }
+                            setSelectedFieldId(selectedField.id);
                           }}
                           className="w-full bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-blue-500/50 transition-colors"
                           placeholder="12"
@@ -1331,7 +1369,13 @@ export function LeftPanel() {
                           <input 
                             type="color" 
                             value={selectedField.color} 
-                            onChange={(e) => updateField(selectedField.id, { color: e.target.value })}
+                            onChange={(e) => {
+                              updateField(selectedField.id, { color: e.target.value });
+                              setSelectedFieldId(selectedField.id);
+                            }}
+                            onFocus={() => {
+                              if (activeTab !== 'typography') setActiveTab('typography');
+                            }}
                             className="w-full h-9 bg-black/50 border border-white/10 rounded-lg cursor-pointer outline-none focus:border-blue-500/50 transition-colors"
                           />
                           <div 
@@ -1351,7 +1395,12 @@ export function LeftPanel() {
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          updateField(selectedField.id, { align: 'left' });
+                          // Ensure typography tab stays active and field remains selected
+                          if (activeTab !== 'typography') setActiveTab('typography');
+                          if (selectedField) {
+                            updateField(selectedField.id, { align: 'left' });
+                            setSelectedFieldId(selectedField.id);
+                          }
                         }}
                         className={clsx(
                           "py-2 flex items-center justify-center rounded-lg text-xs font-medium transition-all border",
@@ -1366,7 +1415,12 @@ export function LeftPanel() {
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          updateField(selectedField.id, { align: 'center' });
+                          // Ensure typography tab stays active and field remains selected
+                          if (activeTab !== 'typography') setActiveTab('typography');
+                          if (selectedField) {
+                            updateField(selectedField.id, { align: 'center' });
+                            setSelectedFieldId(selectedField.id);
+                          }
                         }}
                         className={clsx(
                           "py-2 flex items-center justify-center rounded-lg text-xs font-medium transition-all border",
@@ -1381,7 +1435,12 @@ export function LeftPanel() {
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          updateField(selectedField.id, { align: 'right' });
+                          // Ensure typography tab stays active and field remains selected
+                          if (activeTab !== 'typography') setActiveTab('typography');
+                          if (selectedField) {
+                            updateField(selectedField.id, { align: 'right' });
+                            setSelectedFieldId(selectedField.id);
+                          }
                         }}
                         className={clsx(
                           "py-2 flex items-center justify-center rounded-lg text-xs font-medium transition-all border",
@@ -1403,7 +1462,12 @@ export function LeftPanel() {
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          updateField(selectedField.id, { bold: !selectedField.bold });
+                          // Ensure typography tab stays active and field remains selected
+                          if (activeTab !== 'typography') setActiveTab('typography');
+                          if (selectedField) {
+                            updateField(selectedField.id, { bold: !selectedField.bold });
+                            setSelectedFieldId(selectedField.id);
+                          }
                         }}
                         className={clsx(
                           "py-2 flex items-center justify-center rounded-lg text-xs font-medium transition-all border",
@@ -1419,13 +1483,18 @@ export function LeftPanel() {
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          updateField(selectedField.id, { 
-                            fontFamily: 'CrashNumberingSerif',
-                            fontSize: 16,
-                            color: '#000000',
-                            bold: false,
-                            align: 'left'
-                          });
+                          // Ensure typography tab stays active and field remains selected
+                          if (activeTab !== 'typography') setActiveTab('typography');
+                          if (selectedField) {
+                            updateField(selectedField.id, { 
+                              fontFamily: 'CrashNumberingSerif',
+                              fontSize: 16,
+                              color: '#000000',
+                              bold: false,
+                              align: 'left'
+                            });
+                            setSelectedFieldId(selectedField.id);
+                          }
                         }}
                         className="py-2 px-3 bg-gray-600 hover:bg-gray-500 rounded-lg text-xs text-white transition-colors"
                       >
