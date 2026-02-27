@@ -8,6 +8,22 @@ import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 
 export function LeftPanel() {
+  // TabButton component
+  const TabButton = ({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) => (
+    <button
+      onClick={onClick}
+      className={clsx(
+        "flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg transition-all",
+        active
+          ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20"
+          : "text-gray-400 hover:text-white hover:bg-white/10"
+      )}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+
   const { 
     bulkType, setBulkType, setTemplate, templateUrl, addField, interactionMode, setInteractionMode, addCustomFont,
     fromNumber, toNumber, zeroPadding, setNumbering,
@@ -33,6 +49,12 @@ export function LeftPanel() {
   // Keyboard shortcuts for undo/redo
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle shortcuts when not typing in an input
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.contentEditable === 'true') {
+        return;
+      }
+      
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
         e.preventDefault();
         undo();
@@ -49,15 +71,18 @@ export function LeftPanel() {
   const [activeTab, setActiveTab] = useState<'data' | 'typography' | 'layout'>('data');
   const [isGenerating, setIsGenerating] = useState(false);
   const [fontSizeInput, setFontSizeInput] = useState('');
+  const fontSizeInputRef = React.useRef<HTMLInputElement>(null);
 
   const selectedField = fields.find(f => f.id === selectedFieldId);
+  const prevSelectedFieldId = React.useRef<string | null>(null);
 
-  // Sync fontSizeInput with selected field
+  // Sync fontSizeInput with selected field only when selection changes
   useEffect(() => {
-    if (selectedField && selectedField.type !== 'image') {
+    if (selectedField && selectedField.type !== 'image' && selectedField.id !== prevSelectedFieldId.current) {
       setFontSizeInput(selectedField.fontSize.toString());
+      prevSelectedFieldId.current = selectedField.id;
     }
-  }, [selectedField]);
+  }, [selectedField?.id]);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -1263,15 +1288,23 @@ export function LeftPanel() {
                   <div className="col-span-2">
                     <label className="block text-[10px] text-gray-500 mb-1.5 font-medium">Size</label>
                     <input 
+                      ref={fontSizeInputRef}
                       type="number" 
                       value={fontSizeInput}
                       onChange={(e) => {
                         const value = e.target.value;
                         setFontSizeInput(value);
-                        // Only update field if value is valid
+                        // Only update field if value is valid and different from current
                         if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 0)) {
-                          updateField(selectedField.id, { fontSize: value === '' ? 0 : parseInt(value) });
+                          const newFontSize = value === '' ? 0 : parseInt(value);
+                          if (newFontSize !== selectedField.fontSize) {
+                            updateField(selectedField.id, { fontSize: newFontSize });
+                          }
                         }
+                      }}
+                      onKeyDown={(e) => {
+                        // Prevent any default behavior that might cause tab switching
+                        e.stopPropagation();
                       }}
                       onBlur={(e) => {
                         const value = parseInt(e.target.value);
