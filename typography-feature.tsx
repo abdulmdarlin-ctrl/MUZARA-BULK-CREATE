@@ -1,6 +1,6 @@
 // Modern Typography Feature Component
 import React from 'react';
-import { useStore, FieldConfig } from '../store';
+import { useStore, FieldConfig } from './src/store';
 import { Type, AlignLeft, AlignCenter, AlignRight, Bold, Plus, Minus, Trash2 } from 'lucide-react';
 import { clsx } from 'clsx';
 
