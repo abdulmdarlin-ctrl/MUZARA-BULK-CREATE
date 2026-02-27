@@ -1119,144 +1119,184 @@ export function LeftPanel() {
           </div>
         )}
 
-        {/* Settings Tabs */}
+        {/* Enhanced Settings Tabs */}
         <div className="space-y-4 pt-4 border-t border-white/10">
-          <div className="flex gap-2 border-b border-white/10 pb-2 overflow-x-auto">
-            <TabButton active={activeTab === 'data'} onClick={() => setActiveTab('data')} icon={<Database className="w-3 h-3" />} label="Data" />
-            {(selectedField || activeTab === 'typography') && (
-              <TabButton active={activeTab === 'typography'} onClick={() => setActiveTab('typography')} icon={<Type className="w-3 h-3" />} label="Typography" />
-            )}
-            {bulkType === 'receipts' && (
-              <TabButton active={activeTab === 'layout'} onClick={() => setActiveTab('layout')} icon={<Layout className="w-3 h-3" />} label="Layout" />
-            )}
+          {/* Modern Tab Navigation */}
+          <div className="relative">
+            {/* Tab Background Slider */}
+            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-full" />
+            
+            {/* Tab Container */}
+            <div className="relative flex gap-1 border-b border-white/10 pb-1 overflow-x-auto">
+              {/* Active Tab Indicator */}
+              <div 
+                className="absolute bottom-0 h-0.5 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full transition-all duration-300 ease-out"
+                style={{
+                  width: '80px',
+                  left: activeTab === 'data' ? '0' : 
+                       activeTab === 'typography' ? '84px' : 
+                       activeTab === 'layout' ? '168px' : '0',
+                  opacity: (activeTab === 'data' || activeTab === 'typography' || activeTab === 'layout') ? 1 : 0
+                }}
+              />
+              
+              <TabButton active={activeTab === 'data'} onClick={() => setActiveTab('data')} icon={<Database className="w-4 h-4" />} label="Data" />
+              {(selectedField || activeTab === 'typography') && (
+                <TabButton active={activeTab === 'typography'} onClick={() => setActiveTab('typography')} icon={<Type className="w-4 h-4" />} label="Typography" />
+              )}
+              {bulkType === 'receipts' && (
+                <TabButton active={activeTab === 'layout'} onClick={() => setActiveTab('layout')} icon={<Layout className="w-4 h-4" />} label="Layout" />
+              )}
+            </div>
           </div>
 
-          {activeTab === 'data' && (
-            <div className="space-y-4">
-              {bulkType === 'receipts' && (
-                <div className="space-y-3">
-                  <h3 className="text-xs font-semibold text-gray-300 flex items-center gap-2">
-                    <Hash className="w-3 h-3 text-blue-400" /> Numbering
-                  </h3>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[10px] text-gray-500 mb-1">From</label>
-                      <input 
-                        type="number" 
-                        value={isNaN(fromNumber) ? '' : fromNumber} 
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 0)) {
-                            setNumbering(value === '' ? 0 : parseInt(value), toNumber, zeroPadding);
-                          }
-                        }}
-                        onBlur={(e) => {
-                          const value = parseInt(e.target.value);
-                          if (isNaN(value) || value < 0) {
-                            setNumbering(1, toNumber, zeroPadding);
-                          }
-                        }}
-                        className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] text-gray-500 mb-1">To</label>
-                      <input 
-                        type="number" 
-                        value={isNaN(toNumber) ? '' : toNumber} 
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 0)) {
-                            setNumbering(fromNumber, value === '' ? 0 : parseInt(value), zeroPadding);
-                          }
-                        }}
-                        onBlur={(e) => {
-                          const value = parseInt(e.target.value);
-                          if (isNaN(value) || value < 0) {
-                            setNumbering(fromNumber, 100, zeroPadding);
-                          }
-                        }}
-                        className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] text-gray-500 mb-1">Padding</label>
-                      <input 
-                        type="number" 
-                        value={isNaN(zeroPadding) ? '' : zeroPadding} 
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 0)) {
-                            setNumbering(fromNumber, toNumber, value === '' ? 0 : parseInt(value));
-                          }
-                        }}
-                        onBlur={(e) => {
-                          const value = parseInt(e.target.value);
-                          if (isNaN(value) || value < 0) {
-                            setNumbering(fromNumber, toNumber, 3);
-                          }
-                        }}
-                        className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
-                      />
-                    </div>
-                  </div>
-                </div>
+          {/* Tab Content with Enhanced Transitions */}
+          <div className="relative min-h-[400px] overflow-hidden">
+            {/* Data Tab Content */}
+            <div 
+              className={clsx(
+                "transition-all duration-300 ease-out",
+                activeTab === 'data' 
+                  ? "opacity-100 translate-x-0" 
+                  : "opacity-0 absolute inset-0 -translate-x-full pointer-events-none"
               )}
-              
-              {(bulkType === 'certificates' || bulkType === 'idcards') && (
-                <div className="space-y-3">
-                  <h3 className="text-xs font-semibold text-gray-300 flex items-center gap-2">
-                    <Database className="w-3 h-3 text-blue-400" /> CSV Data
-                  </h3>
-                  
-                  {csvData.length === 0 ? (
-                    <div>
-                      <label className="block text-[10px] text-gray-500 mb-2">
-                        Upload CSV or ZIP with columns: name, title, photo
-                      </label>
-                      <div className="relative">
-                        <input
-                          type="file"
-                          accept=".csv,.zip,text/csv,application/zip"
-                          onChange={handleDataUpload}
-                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                        />
-                        <div className="flex items-center justify-center gap-2 py-3 px-4 bg-white/5 hover:bg-white/10 border border-white/10 border-dashed rounded-lg text-sm transition-colors">
-                          <Upload className="w-4 h-4 text-gray-400" />
-                          <span className="text-gray-300">Click to upload CSV or ZIP</span>
+            >
+              {activeTab === 'data' && (
+                <div className="space-y-4">
+                  {bulkType === 'receipts' && (
+                    <div className="space-y-3">
+                      <h3 className="text-xs font-semibold text-gray-300 flex items-center gap-2">
+                        <Hash className="w-3 h-3 text-blue-400" /> Numbering
+                      </h3>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[10px] text-gray-500 mb-1">From</label>
+                          <input 
+                            type="number" 
+                            value={isNaN(fromNumber) ? '' : fromNumber} 
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 0)) {
+                                setNumbering(value === '' ? 0 : parseInt(value), toNumber, zeroPadding);
+                              }
+                            }}
+                            onBlur={(e) => {
+                              const value = parseInt(e.target.value);
+                              if (isNaN(value) || value < 0) {
+                                setNumbering(1, toNumber, zeroPadding);
+                              }
+                            }}
+                            className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-gray-500 mb-1">To</label>
+                          <input 
+                            type="number" 
+                            value={isNaN(toNumber) ? '' : toNumber} 
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 0)) {
+                                setNumbering(fromNumber, value === '' ? 0 : parseInt(value), zeroPadding);
+                              }
+                            }}
+                            onBlur={(e) => {
+                              const value = parseInt(e.target.value);
+                              if (isNaN(value) || value < 0) {
+                                setNumbering(fromNumber, 100, zeroPadding);
+                              }
+                            }}
+                            className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-gray-500 mb-1">Padding</label>
+                          <input 
+                            type="number" 
+                            value={isNaN(zeroPadding) ? '' : zeroPadding} 
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 0)) {
+                                setNumbering(fromNumber, toNumber, value === '' ? 0 : parseInt(value));
+                              }
+                            }}
+                            onBlur={(e) => {
+                              const value = parseInt(e.target.value);
+                              if (isNaN(value) || value < 0) {
+                                setNumbering(fromNumber, toNumber, 3);
+                              }
+                            }}
+                            className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
+                          />
                         </div>
                       </div>
                     </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-emerald-400">✓ {csvData.length} records loaded</span>
-                        <button 
-                          onClick={() => { setCsvData([], []); setExtractedImages({}); }}
-                          className="text-xs text-red-400 hover:text-red-300"
-                        >
-                          Clear
-                        </button>
-                      </div>
+                  )}
+                  
+                  {(bulkType === 'certificates' || bulkType === 'idcards') && (
+                    <div className="space-y-3">
+                      <h3 className="text-xs font-semibold text-gray-300 flex items-center gap-2">
+                        <Database className="w-3 h-3 text-blue-400" /> CSV Data
+                      </h3>
                       
-                      {/* Field Mapping */}
-                      <div className="space-y-2 pt-2 border-t border-white/10">
-                        <h4 className="text-[10px] font-medium text-gray-400">Field Mapping</h4>
-                        {fields.filter(f => f.type === 'text' || f.type === 'image').map(field => (
-                          <div key={field.id} className="flex items-center justify-between text-xs">
-                            <span className="text-gray-300">{field.label}</span>
-                            <span className="text-emerald-400 text-[10px]">→ {field.dataKey}</span>
+                      {csvData.length === 0 ? (
+                        <div>
+                          <label className="block text-[10px] text-gray-500 mb-2">
+                            Upload CSV or ZIP with columns: name, title, photo
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="file"
+                              accept=".csv,.zip,text/csv,application/zip"
+                              onChange={handleDataUpload}
+                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                            />
+                            <div className="flex items-center justify-center gap-2 py-3 px-4 bg-white/5 hover:bg-white/10 border border-white/10 border-dashed rounded-lg text-sm transition-colors">
+                              <Upload className="w-4 h-4 text-gray-400" />
+                              <span className="text-gray-300">Click to upload CSV or ZIP</span>
+                            </div>
                           </div>
-                        ))}
-                      </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-emerald-400">✓ {csvData.length} records loaded</span>
+                            <button 
+                              onClick={() => { setCsvData([], []); setExtractedImages({}); }}
+                              className="text-xs text-red-400 hover:text-red-300"
+                            >
+                              Clear
+                            </button>
+                          </div>
+                          
+                          {/* Field Mapping */}
+                          <div className="space-y-2 pt-2 border-t border-white/10">
+                            <h4 className="text-[10px] font-medium text-gray-400">Field Mapping</h4>
+                            {fields.filter(f => f.type === 'text' || f.type === 'image').map(field => (
+                              <div key={field.id} className="flex items-center justify-between text-xs">
+                                <span className="text-gray-300">{field.label}</span>
+                                <span className="text-emerald-400 text-[10px]">→ {field.dataKey}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
               )}
             </div>
-          )}
 
-          {activeTab === 'typography' && (
+            {/* Typography Tab Content */}
+            <div 
+              className={clsx(
+                "transition-all duration-300 ease-out",
+                activeTab === 'typography' 
+                  ? "opacity-100 translate-x-0" 
+                  : "opacity-0 absolute inset-0 translate-x-full pointer-events-none"
+              )}
+            >
+              {activeTab === 'typography' && (
             <div className="space-y-4">
               {selectedField ? (
                 <>
@@ -1650,18 +1690,47 @@ export function LeftPanel() {
 }
 
 function TabButton({ active, onClick, icon, label }: { active: boolean, onClick: () => void, icon: React.ReactNode, label: string }) {
+  const [isHovered, setIsHovered] = useState(false);
+
   return (
     <button
       onClick={onClick}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
       className={clsx(
-        "flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap",
+        "relative flex items-center gap-2 px-4 py-2.5 rounded-t-lg text-sm font-medium transition-all duration-200 ease-out whitespace-nowrap",
+        "transform hover:scale-105",
         active 
-          ? "bg-white/10 text-white" 
-          : "text-gray-400 hover:text-white hover:bg-white/5"
+          ? "text-white bg-gradient-to-b from-white/10 to-white/5 border-t border-x border-white/20 shadow-lg" 
+          : "text-gray-400 hover:text-white hover:bg-white/5 border-t border-x border-transparent"
       )}
     >
-      {icon}
-      {label}
+      {/* Hover Effect */}
+      {!active && isHovered && (
+        <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent rounded-t-lg" />
+      )}
+      
+      {/* Active State Glow */}
+      {active && (
+        <div className="absolute inset-0 bg-gradient-to-b from-blue-500/10 to-purple-500/10 rounded-t-lg" />
+      )}
+      
+      {/* Icon with Animation */}
+      <span className={clsx(
+        "transition-transform duration-200",
+        active ? "scale-110" : "scale-100",
+        isHovered && !active ? "rotate-12" : "rotate-0"
+      )}>
+        {icon}
+      </span>
+      
+      {/* Label */}
+      <span className="relative z-10">{label}</span>
+      
+      {/* Active Indicator Dot */}
+      {active && (
+        <div className="absolute -top-0.5 right-2 w-1.5 h-1.5 bg-gradient-to-r from-blue-400 to-purple-400 rounded-full animate-pulse" />
+      )}
     </button>
   );
 }
