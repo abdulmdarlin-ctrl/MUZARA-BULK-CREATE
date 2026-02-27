@@ -718,8 +718,12 @@ export function LeftPanel() {
           }
           
           // Get Font
-          let font = defaultFont;
-          if (field.fontFamily && embeddedFonts[field.fontFamily]) {
+          let font = defaultFont; // defaultFont is already CrashNumberingSerif
+          
+          // For numbering fields, always use CrashNumberingSerif by default
+          if (field.type === 'number') {
+            font = embeddedFonts['CrashNumberingSerif'] || defaultFont;
+          } else if (field.fontFamily && embeddedFonts[field.fontFamily]) {
             font = embeddedFonts[field.fontFamily];
           } else if (field.fontFamily === 'Helvetica' || field.fontFamily === 'Times New Roman' || field.fontFamily === 'Courier New') {
             font = field.bold ? helveticaBold : helvetica;
