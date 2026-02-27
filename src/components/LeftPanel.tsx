@@ -1609,102 +1609,113 @@ export function LeftPanel() {
           )}
 
           {activeTab === 'layout' && (
-            <div className="space-y-4">
-              <h3 className="text-xs font-semibold text-gray-300 flex items-center gap-2">
-                <Layout className="w-3 h-3 text-blue-400" /> Layout
-              </h3>
-              
-              {/* Leaflets Per Page */}
-              <div className="space-y-2">
-                <label className="block text-[10px] text-gray-500">Leaflets Per Page (A4)</label>
-                <div className="grid grid-cols-4 gap-2">
-                  {[1, 2, 4, 6].map((num) => (
-                    <button
-                      key={num}
-                      onClick={() => setLayout(num, columns, rows, orientation)}
-                      className={clsx(
-                        "py-2 px-1 rounded-lg text-xs font-medium transition-all",
-                        leafletsPerPage === num
-                          ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20"
-                          : "bg-white/5 text-gray-300 hover:bg-white/10"
-                      )}
-                    >
-                      {num}
-                    </button>
-                  ))}
+            <div 
+              className={clsx(
+                "transition-all duration-300 ease-out",
+                activeTab === 'layout' 
+                  ? "opacity-100 translate-x-0" 
+                  : "opacity-0 absolute inset-0 translate-x-full pointer-events-none"
+              )}
+            >
+              {activeTab === 'layout' && (
+                <div className="space-y-4">
+                  <h3 className="text-xs font-semibold text-gray-300 flex items-center gap-2">
+                    <Layout className="w-3 h-3 text-blue-400" /> Layout
+                  </h3>
+                  
+                  {/* Leaflets Per Page */}
+                  <div className="space-y-2">
+                    <label className="block text-[10px] text-gray-500">Leaflets Per Page (A4)</label>
+                    <div className="grid grid-cols-4 gap-2">
+                      {[1, 2, 4, 6].map((num) => (
+                        <button
+                          key={num}
+                          onClick={() => setLayout(num, columns, rows, orientation)}
+                          className={clsx(
+                            "py-2 px-1 rounded-lg text-xs font-medium transition-all",
+                            leafletsPerPage === num
+                              ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20"
+                              : "bg-white/5 text-gray-300 hover:bg-white/10"
+                          )}
+                        >
+                          {num}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        min="1"
+                        max="20"
+                        placeholder="Custom"
+                        value={![1, 2, 4, 6].includes(leafletsPerPage) ? leafletsPerPage : ''}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 1 && parseInt(value) <= 20)) {
+                            setLayout(value === '' ? 1 : parseInt(value), columns, rows, orientation);
+                          }
+                        }}
+                        onBlur={(e) => {
+                          const value = parseInt(e.target.value);
+                          if (isNaN(value) || value < 1 || value > 20) {
+                            setLayout(1, columns, rows, orientation);
+                          }
+                        }}
+                        className="flex-1 bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
+                      />
+                      <button
+                        onClick={() => setLayout(1, columns, rows, orientation)}
+                        className="px-2 py-1 bg-white/5 hover:bg-white/10 rounded text-xs text-gray-300"
+                      >
+                        Reset
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-gray-500">
+                      {leafletsPerPage === 1 && "Single leaflet per A4 page"}
+                      {leafletsPerPage === 2 && "2 leaflets in 2x1 grid"}
+                      {leafletsPerPage === 4 && "4 leaflets in 2x2 grid"}
+                      {leafletsPerPage === 6 && "6 leaflets in 2x3 grid"}
+                      {![1, 2, 4, 6].includes(leafletsPerPage) && `${leafletsPerPage} custom leaflets per page`}
+                    </p>
+                  </div>
+                  
+                  {/* Orientation */}
+                  <div className="space-y-2">
+                    <label className="block text-[10px] text-gray-500">Orientation</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => setLayout(leafletsPerPage, columns, rows, 'portrait')}
+                        className={clsx(
+                          "flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs transition-all",
+                          orientation === 'portrait'
+                            ? "bg-blue-600 text-white"
+                            : "bg-white/5 text-gray-300 hover:bg-white/10"
+                        )}
+                      >
+                        <div className="w-3 h-4 border border-current rounded-sm" /> Portrait
+                      </button>
+                      <button
+                        onClick={() => setLayout(leafletsPerPage, columns, rows, 'landscape')}
+                        className={clsx(
+                          "flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs transition-all",
+                          orientation === 'landscape'
+                            ? "bg-blue-600 text-white"
+                            : "bg-white/5 text-gray-300 hover:bg-white/10"
+                        )}
+                      >
+                        <div className="w-4 h-3 border border-current rounded-sm" /> Landscape
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {/* Info */}
+                  <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
+                    <p className="text-[10px] text-blue-300">
+                      <span className="font-semibold">Auto Layout:</span> Leaflets are automatically scaled and positioned with padding for clean printing.
+                    </p>
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <input
-                    type="number"
-                    min="1"
-                    max="20"
-                    placeholder="Custom"
-                    value={![1, 2, 4, 6].includes(leafletsPerPage) ? leafletsPerPage : ''}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 1 && parseInt(value) <= 20)) {
-                        setLayout(value === '' ? 1 : parseInt(value), columns, rows, orientation);
-                      }
-                    }}
-                    onBlur={(e) => {
-                      const value = parseInt(e.target.value);
-                      if (isNaN(value) || value < 1 || value > 20) {
-                        setLayout(1, columns, rows, orientation);
-                      }
-                    }}
-                    className="flex-1 bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
-                  />
-                  <button
-                    onClick={() => setLayout(1, columns, rows, orientation)}
-                    className="px-2 py-1 bg-white/5 hover:bg-white/10 rounded text-xs text-gray-300"
-                  >
-                    Reset
-                  </button>
-                </div>
-                <p className="text-[10px] text-gray-500">
-                  {leafletsPerPage === 1 && "Single leaflet per A4 page"}
-                  {leafletsPerPage === 2 && "2 leaflets in 2x1 grid"}
-                  {leafletsPerPage === 4 && "4 leaflets in 2x2 grid"}
-                  {leafletsPerPage === 6 && "6 leaflets in 2x3 grid"}
-                  {![1, 2, 4, 6].includes(leafletsPerPage) && `${leafletsPerPage} custom leaflets per page`}
-                </p>
-              </div>
-              
-              {/* Orientation */}
-              <div className="space-y-2">
-                <label className="block text-[10px] text-gray-500">Orientation</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => setLayout(leafletsPerPage, columns, rows, 'portrait')}
-                    className={clsx(
-                      "flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs transition-all",
-                      orientation === 'portrait'
-                        ? "bg-blue-600 text-white"
-                        : "bg-white/5 text-gray-300 hover:bg-white/10"
-                    )}
-                  >
-                    <div className="w-3 h-4 border border-current rounded-sm" /> Portrait
-                  </button>
-                  <button
-                    onClick={() => setLayout(leafletsPerPage, columns, rows, 'landscape')}
-                    className={clsx(
-                      "flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs transition-all",
-                      orientation === 'landscape'
-                        ? "bg-blue-600 text-white"
-                        : "bg-white/5 text-gray-300 hover:bg-white/10"
-                    )}
-                  >
-                    <div className="w-4 h-3 border border-current rounded-sm" /> Landscape
-                  </button>
-                </div>
-              </div>
-              
-              {/* Info */}
-              <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
-                <p className="text-[10px] text-blue-300">
-                  <span className="font-semibold">Auto Layout:</span> Leaflets are automatically scaled and positioned with padding for clean printing.
-                </p>
-              </div>
+              )}
             </div>
           )}
             </div>
