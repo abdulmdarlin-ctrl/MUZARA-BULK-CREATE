@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import JSZip from 'jszip';
 import { useStore, FieldConfig } from '../store';
-import { FileUp, FileText, Award, IdCard, Plus, Type, Hash, Image as ImageIcon, MousePointer2, Upload, Database, Layout, Zap, Download, Trash2, Undo2, Redo2, AlignLeft, AlignCenter, AlignRight, Bold } from 'lucide-react';
+import { FileUp, FileText, Award, IdCard, Plus, Hash, Image as ImageIcon, MousePointer2, Upload, Database, Layout, Zap, Download, Trash2, Undo2, Redo2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
@@ -68,21 +68,10 @@ export function LeftPanel() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [undo, redo]);
 
-  const [activeTab, setActiveTab] = useState<'data' | 'typography' | 'layout'>('data');
+  const [activeTab, setActiveTab] = useState<'data' | 'layout'>('data');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [fontSizeInput, setFontSizeInput] = useState('');
-  const fontSizeInputRef = React.useRef<HTMLInputElement>(null);
 
   const selectedField = fields.find(f => f.id === selectedFieldId);
-  const prevSelectedFieldId = React.useRef<string | null>(null);
-
-  // Sync fontSizeInput with selected field only when selection changes
-  useEffect(() => {
-    if (selectedField && selectedField.type !== 'image' && selectedField.id !== prevSelectedFieldId.current) {
-      setFontSizeInput(selectedField.fontSize.toString());
-      prevSelectedFieldId.current = selectedField.id;
-    }
-  }, [selectedField?.id]);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -1119,7 +1108,6 @@ export function LeftPanel() {
         <div className="space-y-4 pt-4 border-t border-white/10">
           <div className="flex gap-2 border-b border-white/10 pb-2 overflow-x-auto">
             <TabButton active={activeTab === 'data'} onClick={() => setActiveTab('data')} icon={<Database className="w-3 h-3" />} label="Data" />
-            <TabButton active={activeTab === 'typography'} onClick={() => setActiveTab('typography')} icon={<Type className="w-3 h-3" />} label="Type" />
             {bulkType === 'receipts' && (
               <TabButton active={activeTab === 'layout'} onClick={() => setActiveTab('layout')} icon={<Layout className="w-3 h-3" />} label="Layout" />
             )}
@@ -1250,169 +1238,6 @@ export function LeftPanel() {
             </div>
           )}
 
-          {activeTab === 'typography' && selectedField && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-semibold text-gray-300 flex items-center gap-2">
-                  <Type className="w-3 h-3 text-blue-400" /> Typography
-                </h3>
-                <button
-                  onClick={() => removeField(selectedField.id)}
-                  className="p-1.5 bg-red-500/10 border border-red-500/50 text-red-400 hover:bg-red-500/20 hover:text-red-300 rounded-lg transition-colors"
-                  title="Remove Field"
-                >
-                  <Trash2 className="w-3 h-3" />
-                </button>
-              </div>
-
-              {/* Font Settings */}
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-[10px] text-gray-500 mb-1.5 font-medium">Font Family</label>
-                  <select 
-                    value={selectedField.fontFamily} 
-                    onChange={(e) => updateField(selectedField.id, { fontFamily: e.target.value })}
-                    className="w-full bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-blue-500/50 transition-colors"
-                  >
-                    <option value="CrashNumberingSerif">CrashNumberingSerif</option>
-                    <option value="Helvetica">Helvetica</option>
-                    <option value="Times New Roman">Times New Roman</option>
-                    <option value="Courier New">Courier New</option>
-                    {customFonts.map(font => (
-                      <option key={font.name} value={font.name}>{font.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="col-span-2">
-                    <label className="block text-[10px] text-gray-500 mb-1.5 font-medium">Size</label>
-                    <input 
-                      ref={fontSizeInputRef}
-                      type="number" 
-                      value={fontSizeInput}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        setFontSizeInput(value);
-                        // Only update field if value is valid and different from current
-                        if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 0)) {
-                          const newFontSize = value === '' ? 0 : parseInt(value);
-                          if (newFontSize !== selectedField.fontSize) {
-                            updateField(selectedField.id, { fontSize: newFontSize });
-                          }
-                        }
-                      }}
-                      onKeyDown={(e) => {
-                        // Prevent any default behavior that might cause tab switching
-                        e.stopPropagation();
-                      }}
-                      onBlur={(e) => {
-                        const value = parseInt(e.target.value);
-                        if (isNaN(value) || value < 0) {
-                          setFontSizeInput('12');
-                          updateField(selectedField.id, { fontSize: 12 });
-                        }
-                      }}
-                      className="w-full bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-blue-500/50 transition-colors"
-                      placeholder="12"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] text-gray-500 mb-1.5 font-medium">Color</label>
-                    <div className="relative">
-                      <input 
-                        type="color" 
-                        value={selectedField.color} 
-                        onChange={(e) => updateField(selectedField.id, { color: e.target.value })}
-                        className="w-full h-9 bg-black/50 border border-white/10 rounded-lg cursor-pointer outline-none focus:border-blue-500/50 transition-colors"
-                      />
-                      <div 
-                        className="absolute inset-0 rounded-lg pointer-events-none"
-                        style={{ backgroundColor: selectedField.color, opacity: 0.2 }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Text Alignment */}
-              <div className="space-y-2">
-                <label className="block text-[10px] text-gray-500 mb-1.5 font-medium">Alignment</label>
-                <div className="grid grid-cols-3 gap-1">
-                  <button
-                    onClick={() => updateField(selectedField.id, { align: 'left' })}
-                    className={clsx(
-                      "py-2 flex items-center justify-center rounded-lg text-xs font-medium transition-all border",
-                      selectedField.align === 'left' 
-                        ? "bg-blue-600 border-blue-500 text-white" 
-                        : "bg-black/50 border-white/10 text-gray-400 hover:bg-white/5 hover:text-white"
-                    )}
-                  >
-                    <AlignLeft className="w-3 h-3" />
-                  </button>
-                  <button
-                    onClick={() => updateField(selectedField.id, { align: 'center' })}
-                    className={clsx(
-                      "py-2 flex items-center justify-center rounded-lg text-xs font-medium transition-all border",
-                      selectedField.align === 'center' 
-                        ? "bg-blue-600 border-blue-500 text-white" 
-                        : "bg-black/50 border-white/10 text-gray-400 hover:bg-white/5 hover:text-white"
-                    )}
-                  >
-                    <AlignCenter className="w-3 h-3" />
-                  </button>
-                  <button
-                    onClick={() => updateField(selectedField.id, { align: 'right' })}
-                    className={clsx(
-                      "py-2 flex items-center justify-center rounded-lg text-xs font-medium transition-all border",
-                      selectedField.align === 'right' 
-                        ? "bg-blue-600 border-blue-500 text-white" 
-                        : "bg-black/50 border-white/10 text-gray-400 hover:bg-white/5 hover:text-white"
-                    )}
-                  >
-                    <AlignRight className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Text Style */}
-              <div className="space-y-2">
-                <label className="block text-[10px] text-gray-500 mb-1.5 font-medium">Style</label>
-                <button
-                  onClick={() => updateField(selectedField.id, { bold: !selectedField.bold })}
-                  className={clsx(
-                    "w-full py-2 rounded-lg text-xs font-medium transition-all border",
-                    selectedField.bold 
-                      ? "bg-blue-600 border-blue-500 text-white" 
-                      : "bg-black/50 border-white/10 text-gray-400 hover:bg-white/5 hover:text-white"
-                  )}
-                >
-                  <Bold className="w-3 h-3 inline mr-2" />
-                  {selectedField.bold ? 'Bold' : 'Regular'}
-                </button>
-              </div>
-
-              {/* Field Info */}
-              <div className="bg-black/30 rounded-lg p-3 space-y-1">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-gray-400">Type</span>
-                  <span className="text-gray-200 capitalize">{selectedField.type}</span>
-                </div>
-                {selectedField.dataKey && (
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-gray-400">Data Key</span>
-                    <span className="text-gray-200">{selectedField.dataKey}</span>
-                  </div>
-                )}
-                {selectedField.label && (
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-gray-400">Label</span>
-                    <span className="text-gray-200">{selectedField.label}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
 
           {activeTab === 'layout' && (
             <div className="space-y-4">
