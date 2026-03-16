@@ -43,6 +43,12 @@ export interface AppState {
   zeroPadding: number;
   setNumbering: (from: number, to: number, padding: number) => void;
 
+  // Custom Numbering Format
+  numberingPrefix: string;
+  numberingYear: string;
+  numberingSeparator: string;
+  setCustomNumbering: (prefix: string, year: string, separator: string) => void;
+
   // CSV Data
   csvData: any[];
   csvHeaders: string[];
@@ -66,6 +72,14 @@ export interface AppState {
   // Preview State
   currentPage: number;
   setCurrentPage: (page: number) => void;
+
+  // Loading States
+  isLoading: boolean;
+  setIsLoading: (loading: boolean) => void;
+  loadingMessage: string;
+  setLoadingMessage: (message: string) => void;
+  uploadProgress: number;
+  setUploadProgress: (progress: number) => void;
 
   // Interaction Mode
   interactionMode: 'select' | 'place_point';
@@ -122,6 +136,12 @@ export const useStore = create<AppState>()(
       zeroPadding: 4,
       setNumbering: (from, to, padding) => set({ fromNumber: from, toNumber: to, zeroPadding: padding }),
 
+      // Custom Numbering Format
+      numberingPrefix: 'NTIG',
+      numberingYear: new Date().getFullYear().toString(),
+      numberingSeparator: '/',
+      setCustomNumbering: (prefix, year, separator) => set({ numberingPrefix: prefix, numberingYear: year, numberingSeparator: separator }),
+
       csvData: [],
       csvHeaders: [],
       setCsvData: (data, headers) => set({ csvData: data, csvHeaders: headers }),
@@ -142,6 +162,14 @@ export const useStore = create<AppState>()(
 
       currentPage: 1,
       setCurrentPage: (page) => set({ currentPage: page }),
+
+      // Loading States
+      isLoading: false,
+      setIsLoading: (loading) => set({ isLoading: loading }),
+      loadingMessage: '',
+      setLoadingMessage: (message) => set({ loadingMessage: message }),
+      uploadProgress: 0,
+      setUploadProgress: (progress) => set({ uploadProgress: progress }),
 
       interactionMode: 'select',
       setInteractionMode: (mode) => set({ interactionMode: mode }),

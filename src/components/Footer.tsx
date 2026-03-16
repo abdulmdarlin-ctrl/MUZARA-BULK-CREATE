@@ -9,7 +9,7 @@ export function Footer() {
     <div className="bg-[#0a0a0a] border-t border-white/10 shrink-0 z-10">
       <button 
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full flex items-center justify-between px-6 py-3 hover:bg-white/5 transition-colors"
+        className="w-full flex items-center justify-between px-3 sm:px-6 py-2 sm:py-3 hover:bg-white/5 transition-colors"
       >
         <div className="flex items-center gap-3">
           <Info className="w-4 h-4 text-blue-400" />
@@ -27,7 +27,7 @@ export function Footer() {
         "overflow-hidden transition-all duration-300 ease-in-out",
         isExpanded ? "max-h-64 border-t border-white/5" : "max-h-0"
       )}>
-        <div className="p-6 grid grid-cols-3 gap-8 text-sm">
+        <div className="p-3 sm:p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-8 text-sm">
           <div className="space-y-3">
             <h4 className="font-semibold text-gray-300 uppercase tracking-wider text-xs">Step-by-Step Workflow</h4>
             <ol className="list-decimal list-inside text-gray-400 space-y-1">

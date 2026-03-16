@@ -586,6 +586,7 @@ export function CenterPanel() {
         if (obj.fontFamily !== field.fontFamily) obj.set('fontFamily', field.fontFamily);
         if (obj.fill !== field.color) obj.set('fill', field.color);
         if ((obj.fontWeight === 'bold') !== field.bold) obj.set('fontWeight', field.bold ? 'bold' : 'normal');
+        if (obj.textAlign !== field.align) obj.set('textAlign', field.align);
         if (obj.text !== (field.value || field.label)) obj.set('text', field.value || field.label);
         obj.setCoords();
       }
@@ -665,8 +666,8 @@ export function CenterPanel() {
 
   return (
     <div className="flex-1 bg-[#111111] flex flex-col h-full overflow-hidden">
-      <div className="p-4 border-b border-white/10 flex items-center justify-between bg-[#111111]">
-        <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Design Canvas</h2>
+      <div className="p-2 sm:p-4 border-b border-white/10 flex items-center justify-between bg-[#111111]">
+        <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider hidden sm:block">Design Canvas</h2>
         <div className="flex items-center gap-2">
           <button 
             onClick={() => setPanMode(!panMode)}
@@ -692,7 +693,7 @@ export function CenterPanel() {
       <div 
         ref={containerRef}
         className={clsx(
-          "flex-1 overflow-hidden bg-[#0a0a0a] flex items-center justify-center p-8 relative",
+          "flex-1 overflow-hidden bg-[#0a0a0a] flex items-center justify-center p-3 sm:p-4 lg:p-8 relative",
           (isPanning || panMode) ? "cursor-grab active:cursor-grabbing" : ""
         )}
         onMouseDown={handleMouseDown}
@@ -717,7 +718,7 @@ export function CenterPanel() {
         )}
       </div>
 
-      <div className="p-4 border-t border-white/10 bg-[#111111] flex items-center justify-end">
+      <div className="p-2 sm:p-4 border-t border-white/10 bg-[#111111] flex items-center justify-end">
         <div className="text-xs text-gray-500">
           {isPanning ? 'Panning Mode (Spacebar held)' : 'Design Mode'}
         </div>

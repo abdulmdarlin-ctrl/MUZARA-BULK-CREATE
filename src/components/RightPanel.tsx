@@ -6,7 +6,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 // Set worker source for pdf.js
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
-function PdfPage({ pdf, pageNumber }: { pdf: any, pageNumber: number }) {
+function PdfPage({ pdf, pageNumber }: { pdf: any, pageNumber: number, key?: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -124,8 +124,8 @@ export function RightPanel() {
   }, [generatedPdfUrl]);
 
   return (
-    <div className="w-full md:w-[500px] bg-[#1a1a1a] border-l border-white/10 flex flex-col h-full shrink-0">
-      <div className="p-4 border-b border-white/10 flex items-center justify-between bg-[#111111]">
+    <div className="w-full bg-[#1a1a1a] border-l border-white/10 flex flex-col h-full">
+      <div className="p-2 sm:p-4 border-b border-white/10 flex items-center justify-between bg-[#111111]">
         <div className="flex items-center gap-3">
           <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Final Output</h2>
           {numPages > 0 && (
@@ -157,7 +157,7 @@ export function RightPanel() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto bg-[#0a0a0a] flex flex-col items-center p-8 relative scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-transparent">
+      <div className="flex-1 overflow-auto bg-[#0a0a0a] flex flex-col items-center p-3 sm:p-4 lg:p-8 relative scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-transparent">
         {generatedPdfUrl ? (
           <>
             {loading && (

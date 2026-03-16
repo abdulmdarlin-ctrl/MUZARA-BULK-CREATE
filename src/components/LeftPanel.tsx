@@ -6,6 +6,7 @@ import { FileUp, FileText, Award, IdCard, Plus, Hash, Image as ImageIcon, MouseP
 import { clsx } from 'clsx';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
+import { LoadingSpinner, Skeleton } from './LoadingScreen';
 
 export function LeftPanel() {
   // TabButton component
@@ -58,6 +59,7 @@ export function LeftPanel() {
   const { 
     bulkType, setBulkType, setTemplate, templateUrl, addField, interactionMode, setInteractionMode, addCustomFont,
     fromNumber, toNumber, zeroPadding, setNumbering,
+    numberingPrefix, numberingYear, numberingSeparator, setCustomNumbering,
     setCsvData, csvHeaders, csvData = [],
     fields = [], selectedFieldId, setSelectedFieldId, updateField, removeField,
     leafletsPerPage, columns, rows, orientation, setLayout,
@@ -102,6 +104,7 @@ export function LeftPanel() {
   const [activeTab, setActiveTab] = useState<'data' | 'typography' | 'layout'>('data');
   const [isGenerating, setIsGenerating] = useState(false);
   const [lastSelectedFieldId, setLastSelectedFieldId] = useState<string | null>(null);
+  const [isTabLoading, setIsTabLoading] = useState(false);
 
   const selectedField = fields.find(f => f.id === selectedFieldId);
 
@@ -711,22 +714,23 @@ export function LeftPanel() {
           // For certificates, use sequential numbering 001-100
           if (shouldLoopReceipts) {
             // Each point field gets a unique number: P1=currentNumber, P2=currentNumber+1, etc.
-            text = String(currentNumber + fieldIndex).padStart(zeroPadding, '0');
+            const baseNumber = String(currentNumber + fieldIndex).padStart(zeroPadding, '0');
+            text = `${numberingPrefix}${numberingSeparator}${numberingYear}${numberingSeparator}${baseNumber}`;
           } else if (shouldLoopCertificates) {
             // For certificates, use sequential numbering from fromNumber
-            text = String(fromNumber + dataRowIndex).padStart(zeroPadding, '0');
+            const baseNumber = String(fromNumber + dataRowIndex).padStart(zeroPadding, '0');
+            text = `${numberingPrefix}${numberingSeparator}${numberingYear}${numberingSeparator}${baseNumber}`;
           }
           
-          // Get Font
-          let font = defaultFont; // defaultFont is already CrashNumberingSerif
-          
-          // For numbering fields, always use CrashNumberingSerif by default
-          if (field.type === 'number') {
-            font = embeddedFonts['CrashNumberingSerif'] || defaultFont;
-          } else if (field.fontFamily && embeddedFonts[field.fontFamily]) {
+          // Get Font — respect user's font selection from typography tab
+          let font = defaultFont;
+          if (field.fontFamily && embeddedFonts[field.fontFamily]) {
             font = embeddedFonts[field.fontFamily];
           } else if (field.fontFamily === 'Helvetica' || field.fontFamily === 'Times New Roman' || field.fontFamily === 'Courier New') {
             font = field.bold ? helveticaBold : helvetica;
+          } else {
+            // Fallback: use CrashNumberingSerif or defaultFont
+            font = embeddedFonts['CrashNumberingSerif'] || defaultFont;
           }
           
           // Color
@@ -841,11 +845,15 @@ export function LeftPanel() {
             continue;
           }
           
+          // Get Font — respect user's font selection from typography tab
           let font = defaultFont;
           if (field.fontFamily && embeddedFonts[field.fontFamily]) {
             font = embeddedFonts[field.fontFamily];
           } else if (field.fontFamily === 'Helvetica' || field.fontFamily === 'Times New Roman' || field.fontFamily === 'Courier New') {
             font = field.bold ? helveticaBold : helvetica;
+          } else {
+            // Fallback: use CrashNumberingSerif or defaultFont
+            font = embeddedFonts['CrashNumberingSerif'] || defaultFont;
           }
           
           const hex = field.color.replace('#', '');
@@ -956,8 +964,8 @@ export function LeftPanel() {
   };
 
   return (
-    <div className="w-full md:w-96 bg-[#1a1a1a] flex flex-col h-full overflow-hidden shrink-0">
-      <div className="p-6 space-y-8 overflow-y-auto scrollbar-hide">
+    <div className="w-full bg-[#1a1a1a] flex flex-col h-full overflow-hidden">
+      <div className="p-4 lg:p-6 space-y-6 lg:space-y-8 overflow-y-auto scrollbar-hide">
         {/* Bulk Type Selector */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
@@ -1175,21 +1183,66 @@ export function LeftPanel() {
                 }}
               />
               
-              <TabButton active={activeTab === 'data'} onClick={() => setActiveTab('data')} icon={<Database className="w-4 h-4" />} label="Data" />
+              <TabButton 
+                active={activeTab === 'data'} 
+                onClick={() => {
+                  setIsTabLoading(true);
+                  setTimeout(() => {
+                    setActiveTab('data');
+                    setIsTabLoading(false);
+                  }, 100);
+                }} 
+                icon={<Database className="w-4 h-4" />} 
+                label="Data" 
+              />
               {(selectedField || activeTab === 'typography') && (
-                <TabButton active={activeTab === 'typography'} onClick={() => setActiveTab('typography')} icon={<Type className="w-4 h-4" />} label="Typography" />
+                <TabButton 
+                  active={activeTab === 'typography'} 
+                  onClick={() => {
+                    setIsTabLoading(true);
+                    setTimeout(() => {
+                      setActiveTab('typography');
+                      setIsTabLoading(false);
+                    }, 100);
+                  }} 
+                  icon={<Type className="w-4 h-4" />} 
+                  label="Typography" 
+                />
               )}
               {bulkType === 'receipts' && (
-                <TabButton active={activeTab === 'layout'} onClick={() => setActiveTab('layout')} icon={<Layout className="w-4 h-4" />} label="Layout" />
+                <TabButton 
+                  active={activeTab === 'layout'} 
+                  onClick={() => {
+                    setIsTabLoading(true);
+                    setTimeout(() => {
+                      setActiveTab('layout');
+                      setIsTabLoading(false);
+                    }, 100);
+                  }} 
+                  icon={<Layout className="w-4 h-4" />} 
+                  label="Layout" 
+                />
               )}
             </div>
           </div>
 
           {/* Tab Content with Enhanced Transitions */}
           <div className="relative min-h-[400px] overflow-hidden">
+            {/* Show skeleton when switching tabs */}
+            {isTabLoading && (
+              <div className="space-y-4">
+                <Skeleton lines={3} />
+                <div className="grid grid-cols-2 gap-2">
+                  <Skeleton />
+                  <Skeleton />
+                </div>
+                <Skeleton lines={2} />
+              </div>
+            )}
+
             {/* Data Tab Content */}
-            <div>
-              {activeTab === 'data' && (
+            <div className={clsx("transition-opacity duration-200", isTabLoading ? "opacity-0" : "opacity-100")}>
+              {activeTab === 'data' && !isTabLoading && (
                 <div className="space-y-4">
                   {bulkType === 'receipts' && (
                     <div className="space-y-3">
@@ -1258,6 +1311,58 @@ export function LeftPanel() {
                           />
                         </div>
                       </div>
+
+                      {/* Custom Numbering Format */}
+                      <div className="space-y-2 pt-2 border-t border-white/10">
+                        <h4 className="text-[10px] font-medium text-gray-400">Custom Format</h4>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div>
+                            <label className="block text-[10px] text-gray-500 mb-1">Prefix</label>
+                            <input 
+                              type="text" 
+                              value={numberingPrefix} 
+                              onChange={(e) => {
+                                setCustomNumbering(e.target.value, numberingYear, numberingSeparator);
+                              }}
+                              className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-gray-500 mb-1">Year</label>
+                            <input 
+                              type="text" 
+                              value={numberingYear} 
+                              onChange={(e) => {
+                                setCustomNumbering(numberingPrefix, e.target.value, numberingSeparator);
+                              }}
+                              className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-gray-500 mb-1">Separator</label>
+                            <select 
+                              value={numberingSeparator} 
+                              onChange={(e) => {
+                                setCustomNumbering(numberingPrefix, numberingYear, e.target.value);
+                              }}
+                              className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
+                            >
+                              <option value="/">/</option>
+                              <option value="-">-</option>
+                              <option value="_">_</option>
+                              <option value=" ">Space</option>
+                            </select>
+                          </div>
+                        </div>
+                        
+                        {/* Preview */}
+                        <div className="bg-black/30 rounded p-2">
+                          <div className="text-[10px] text-gray-500 mb-1">Preview:</div>
+                          <div className="text-xs text-blue-400 font-mono">
+                            {numberingPrefix}{numberingSeparator}{numberingYear}{numberingSeparator}{String(fromNumber).padStart(zeroPadding, '0')}
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   )}
                   
@@ -1316,8 +1421,8 @@ export function LeftPanel() {
             </div>
 
             {/* Typography Tab Content */}
-            <div>
-              {activeTab === 'typography' && (
+            <div className={clsx("transition-opacity duration-200", isTabLoading ? "opacity-0" : "opacity-100")}>
+              {activeTab === 'typography' && !isTabLoading && (
             <div className="space-y-4">
               {selectedField ? (
                 <>
@@ -1595,8 +1700,8 @@ export function LeftPanel() {
           )}
 
           {activeTab === 'layout' && (
-            <div>
-              {activeTab === 'layout' && (
+            <div className={clsx("transition-opacity duration-200", isTabLoading ? "opacity-0" : "opacity-100")}>
+              {activeTab === 'layout' && !isTabLoading && (
                 <div className="space-y-4">
                   <h3 className="text-xs font-semibold text-gray-300 flex items-center gap-2">
                     <Layout className="w-3 h-3 text-blue-400" /> Layout
@@ -1705,10 +1810,29 @@ export function LeftPanel() {
         <button 
           onClick={handleGenerate}
           disabled={isGenerating || !templateUrl}
-          className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 rounded-xl shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center gap-2 text-sm"
+          className={clsx(
+            "w-full font-bold py-3 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 text-sm relative overflow-hidden",
+            isGenerating 
+              ? "bg-gradient-to-r from-blue-600 to-purple-600 cursor-not-allowed" 
+              : "bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-blue-500/20"
+          )}
         >
-          <Zap className="w-4 h-4" />
-          {isGenerating ? 'Generating...' : 'Generate PDF'}
+          {/* Animated background overlay when generating */}
+          {isGenerating && (
+            <div className="absolute inset-0 bg-gradient-to-r from-blue-600/20 to-purple-600/20 animate-pulse" />
+          )}
+          
+          {isGenerating ? (
+            <>
+              <LoadingSpinner size="sm" className="text-white" />
+              <span className="relative z-10">Generating PDF...</span>
+            </>
+          ) : (
+            <>
+              <Zap className="w-4 h-4 relative z-10" />
+              <span className="relative z-10">Generate PDF</span>
+            </>
+          )}
         </button>
 
       </div>
