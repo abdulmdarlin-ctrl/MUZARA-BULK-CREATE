@@ -1423,9 +1423,9 @@ export function LeftPanel() {
             {/* Typography Tab Content */}
             <div className={clsx("transition-opacity duration-200", isTabLoading ? "opacity-0" : "opacity-100")}>
               {activeTab === 'typography' && !isTabLoading && (
-            <div className="space-y-4">
-              {selectedField ? (
-                <>
+                <div className="space-y-4">
+                  {selectedField ? (
+                    <>
                   <div className="flex items-center justify-between">
                     <h3 className="text-xs font-semibold text-gray-300 flex items-center gap-2">
                       <Type className="w-3 h-3 text-blue-400" /> Typography
@@ -1687,17 +1687,18 @@ export function LeftPanel() {
                         <span className="text-gray-200">{selectedField.label}</span>
                       </div>
                     )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-center py-8">
+                    <Type className="w-8 h-8 text-gray-500 mx-auto mb-3" />
+                    <p className="text-sm text-gray-400">No field selected</p>
+                    <p className="text-xs text-gray-500 mt-1">Select a field on the canvas to edit its typography</p>
                   </div>
-                </>
-              ) : (
-                <div className="text-center py-8">
-                  <Type className="w-8 h-8 text-gray-500 mx-auto mb-3" />
-                  <p className="text-sm text-gray-400">No field selected</p>
-                  <p className="text-xs text-gray-500 mt-1">Select a field on the canvas to edit its typography</p>
-                </div>
-              )}
-            </div>
-          )}
+                )}
+              </div>
+            )}
+          </div>
 
           {activeTab === 'layout' && (
             <div className={clsx("transition-opacity duration-200", isTabLoading ? "opacity-0" : "opacity-100")}>
@@ -1802,10 +1803,8 @@ export function LeftPanel() {
               )}
             </div>
           )}
-            </div>
         </div>
-        </div>
-
+      </div>
         {/* Generate Button */}
         <button 
           onClick={handleGenerate}

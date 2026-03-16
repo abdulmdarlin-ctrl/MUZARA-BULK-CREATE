@@ -64,7 +64,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-[#111111] text-white font-sans overflow-hidden">
+    <div className="flex flex-col h-screen ambient-bg text-white font-sans overflow-hidden">
       <Header
         onToggleLeft={() => { setLeftPanelOpen(!leftPanelOpen); setRightPanelOpen(false); }}
         onToggleRight={() => { setRightPanelOpen(!rightPanelOpen); setLeftPanelOpen(false); }}
@@ -72,22 +72,22 @@ export default function App() {
         rightPanelOpen={rightPanelOpen}
       />
 
-      <div className="flex flex-1 overflow-hidden relative">
+      <div className="flex flex-1 overflow-hidden relative p-4 gap-4 pb-2">
         {/* Backdrop overlay for mobile drawers */}
         <div
-          className={`panel-backdrop lg:hidden ${leftPanelOpen || rightPanelOpen ? 'active' : ''}`}
+          className={`panel-backdrop lg:hidden z-[60] ${leftPanelOpen || rightPanelOpen ? 'active' : ''}`}
           onClick={() => { setLeftPanelOpen(false); setRightPanelOpen(false); }}
         />
 
         {/* Left Panel — inline on lg+, overlay drawer on smaller */}
         <div className={`
           hidden lg:flex lg:relative lg:z-auto
-          w-80 xl:w-96 shrink-0
+          w-80 xl:w-96 shrink-0 rounded-2xl overflow-hidden glass-panel
         `}>
           <LeftPanel />
         </div>
         <div className={`
-          lg:hidden fixed inset-y-0 left-0 z-50
+          lg:hidden fixed inset-y-0 left-0 z-[70]
           w-80 sm:w-96
           panel-slide-left ${leftPanelOpen ? 'open' : ''}
         `}>
@@ -95,17 +95,19 @@ export default function App() {
         </div>
 
         {/* Center Panel */}
-        <CenterPanel />
+        <div className="flex-1 rounded-2xl overflow-hidden glass-panel flex flex-col min-w-0">
+          <CenterPanel />
+        </div>
 
         {/* Right Panel — inline on lg+, overlay drawer on smaller */}
         <div className={`
           hidden lg:flex lg:relative lg:z-auto
-          w-80 xl:w-[500px] shrink-0
+          w-80 xl:w-[500px] shrink-0 rounded-2xl overflow-hidden glass-panel
         `}>
           <RightPanel />
         </div>
         <div className={`
-          lg:hidden fixed inset-y-0 right-0 z-50
+          lg:hidden fixed inset-y-0 right-0 z-[70]
           w-80 sm:w-96
           panel-slide-right ${rightPanelOpen ? 'open' : ''}
         `}>
@@ -113,7 +115,9 @@ export default function App() {
         </div>
       </div>
 
-      <Footer />
+      <div className="px-4 pb-4">
+        <Footer />
+      </div>
     </div>
   );
 }

@@ -666,7 +666,7 @@ export function CenterPanel() {
 
   return (
     <div className="flex-1 bg-[#111111] flex flex-col h-full overflow-hidden">
-      <div className="p-2 sm:p-4 border-b border-white/10 flex items-center justify-between bg-[#111111]">
+      <div className="p-3 sm:p-4 border-b border-white/5 flex items-center justify-between bg-black/20 backdrop-blur-md shrink-0 relative z-10">
         <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider hidden sm:block">Design Canvas</h2>
         <div className="flex items-center gap-2">
           <button 
@@ -693,7 +693,7 @@ export function CenterPanel() {
       <div 
         ref={containerRef}
         className={clsx(
-          "flex-1 overflow-hidden bg-[#0a0a0a] flex items-center justify-center p-3 sm:p-4 lg:p-8 relative",
+          "flex-1 overflow-hidden bg-transparent flex items-center justify-center p-4 sm:p-6 lg:p-10 relative custom-pattern-bg",
           (isPanning || panMode) ? "cursor-grab active:cursor-grabbing" : ""
         )}
         onMouseDown={handleMouseDown}
@@ -707,7 +707,7 @@ export function CenterPanel() {
           </div>
         ) : (
           <div 
-            className="bg-white shadow-2xl origin-center"
+            className="bg-white origin-center shadow-[0_20px_60px_-15px_rgba(0,0,0,0.7)] rounded-sm ring-1 ring-white/10"
             style={{ 
               transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom})`,
               pointerEvents: isPanning ? 'none' : 'auto' // Disable canvas interaction while panning
@@ -718,7 +718,7 @@ export function CenterPanel() {
         )}
       </div>
 
-      <div className="p-2 sm:p-4 border-t border-white/10 bg-[#111111] flex items-center justify-end">
+      <div className="p-2 sm:p-3 border-t border-white/5 bg-black/20 backdrop-blur-md flex items-center justify-end">
         <div className="text-xs text-gray-500">
           {isPanning ? 'Panning Mode (Spacebar held)' : 'Design Mode'}
         </div>

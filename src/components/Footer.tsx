@@ -6,10 +6,10 @@ export function Footer() {
   const [isExpanded, setIsExpanded] = useState(false);
 
   return (
-    <div className="bg-[#0a0a0a] border-t border-white/10 shrink-0 z-10">
+    <div className="glass-panel rounded-2xl shrink-0 z-10 transition-all duration-300">
       <button 
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full flex items-center justify-between px-3 sm:px-6 py-2 sm:py-3 hover:bg-white/5 transition-colors"
+        className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-colors rounded-2xl"
       >
         <div className="flex items-center gap-3">
           <Info className="w-4 h-4 text-blue-400" />
@@ -25,9 +25,9 @@ export function Footer() {
 
       <div className={clsx(
         "overflow-hidden transition-all duration-300 ease-in-out",
-        isExpanded ? "max-h-64 border-t border-white/5" : "max-h-0"
+        isExpanded ? "max-h-64 border-t border-white/10 opacity-100" : "max-h-0 opacity-0"
       )}>
-        <div className="p-3 sm:p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-8 text-sm">
+        <div className="p-4 sm:p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 text-sm">
           <div className="space-y-3">
             <h4 className="font-semibold text-gray-300 uppercase tracking-wider text-xs">Step-by-Step Workflow</h4>
             <ol className="list-decimal list-inside text-gray-400 space-y-1">
@@ -43,8 +43,8 @@ export function Footer() {
           <div className="space-y-3">
             <h4 className="font-semibold text-gray-300 uppercase tracking-wider text-xs">CSV Format Guide</h4>
             <p className="text-gray-400">Ensure your CSV has headers in the first row. Example:</p>
-            <div className="bg-black/50 p-3 rounded border border-white/5 font-mono text-xs text-gray-500">
-              Name,ID Number,Title<br/>
+            <div className="bg-black/30 backdrop-blur-md p-3 rounded-lg border border-white/5 font-mono text-xs text-gray-400 shadow-inner">
+              <span className="text-purple-400">Name</span>,<span className="text-purple-400">ID Number</span>,<span className="text-purple-400">Title</span><br/>
               John Doe,ID-001,Manager<br/>
               Jane Smith,ID-002,Developer
             </div>
@@ -52,9 +52,9 @@ export function Footer() {
 
           <div className="space-y-3">
             <h4 className="font-semibold text-gray-300 uppercase tracking-wider text-xs">Status Logs</h4>
-            <div className="bg-black/50 p-3 rounded border border-white/5 h-24 overflow-y-auto font-mono text-xs space-y-1">
-              <div className="text-emerald-400">[10:00:00] System initialized successfully.</div>
-              <div className="text-blue-400">[10:00:05] Waiting for template upload...</div>
+            <div className="bg-black/30 backdrop-blur-md p-3 rounded-lg border border-white/5 h-28 overflow-y-auto font-mono text-xs space-y-2 shadow-inner scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+              <div className="flex gap-2 text-emerald-400/90"><span className="text-gray-600">[10:00:00]</span> System initialized successfully.</div>
+              <div className="flex gap-2 text-blue-400/90"><span className="text-gray-600">[10:00:05]</span> Waiting for template upload...</div>
             </div>
           </div>
         </div>

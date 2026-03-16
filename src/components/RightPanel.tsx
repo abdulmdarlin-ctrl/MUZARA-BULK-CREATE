@@ -52,8 +52,8 @@ function PdfPage({ pdf, pageNumber }: { pdf: any, pageNumber: number, key?: numb
   }, [pdf, pageNumber]);
 
   return (
-    <div className="bg-white shadow-lg mb-8 relative shrink-0">
-      <canvas ref={canvasRef} className="max-w-full block" />
+    <div className="bg-white shadow-[0_20px_60px_-15px_rgba(0,0,0,0.7)] rounded-sm ring-1 ring-white/10 mb-8 relative shrink-0">
+      <canvas ref={canvasRef} className="max-w-full block rounded-sm" />
       {error && (
         <div className="absolute inset-0 flex items-center justify-center text-red-500 bg-white p-4 text-center">
           {error}
@@ -124,8 +124,8 @@ export function RightPanel() {
   }, [generatedPdfUrl]);
 
   return (
-    <div className="w-full bg-[#1a1a1a] border-l border-white/10 flex flex-col h-full">
-      <div className="p-2 sm:p-4 border-b border-white/10 flex items-center justify-between bg-[#111111]">
+    <div className="w-full bg-transparent flex flex-col h-full relative">
+      <div className="p-3 sm:p-4 border-b border-white/5 flex items-center justify-between bg-black/20 backdrop-blur-md relative z-10 shrink-0">
         <div className="flex items-center gap-3">
           <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Final Output</h2>
           {numPages > 0 && (
@@ -139,7 +139,7 @@ export function RightPanel() {
             <>
               <button 
                 onClick={handlePrint}
-                className="p-2 hover:bg-white/10 rounded text-gray-400 hover:text-white transition-colors"
+                className="p-2 bg-white/5 hover:bg-white/10 rounded-lg text-gray-300 hover:text-white transition-all hover:scale-105 active:scale-95 border border-white/5"
                 title="Print"
               >
                 <Printer className="w-4 h-4" />
@@ -147,7 +147,7 @@ export function RightPanel() {
               <a 
                 href={generatedPdfUrl} 
                 download="muzara-export.pdf"
-                className="p-2 hover:bg-white/10 rounded text-gray-400 hover:text-white transition-colors"
+                className="p-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 hover:text-blue-300 rounded-lg transition-all hover:scale-105 active:scale-95 border border-blue-500/20"
                 title="Download PDF"
               >
                 <Download className="w-4 h-4" />
@@ -157,7 +157,7 @@ export function RightPanel() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto bg-[#0a0a0a] flex flex-col items-center p-3 sm:p-4 lg:p-8 relative scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-transparent">
+      <div className="flex-1 overflow-auto bg-transparent custom-pattern-bg flex flex-col items-center p-4 sm:p-6 lg:p-10 relative scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
         {generatedPdfUrl ? (
           <>
             {loading && (
