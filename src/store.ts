@@ -7,8 +7,10 @@ export interface FieldConfig {
   id: string;
   type: 'text' | 'number' | 'image';
   label: string;
-  x: number;
-  y: number;
+  x: number;  // Absolute X (for backward compatibility)
+  y: number;  // Absolute Y (for backward compatibility)
+  rx?: number; // Relative X (0-1, fraction of cell width)
+  ry?: number; // Relative Y (0-1, fraction of cell height)
   width?: number;
   height?: number;
   fontSize: number;

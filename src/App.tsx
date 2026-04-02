@@ -55,6 +55,7 @@ function TemplateCanvas({
   setZoomLevel,
   showCoordinates,
   showGrid,
+  canvasDimensions,
 }: {
   templateUrl: string | null;
   templateFile: File | null;
@@ -86,6 +87,7 @@ function TemplateCanvas({
   setZoomLevel: (zoom: number) => void;
   showCoordinates: boolean;
   showGrid: boolean;
+  canvasDimensions: { width: number; height: number };
 }) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -123,8 +125,8 @@ function TemplateCanvas({
           const pdf = await loadingTask.promise;
           const page = await pdf.getPage(1);
           setPdfPage(page);
-          const viewport = page.getViewport({ scale: 1 });
-          setImgSize({ width: viewport.width, height: viewport.height });
+          // Force A4 dimensions for consistent coordinate system
+          setImgSize({ width: 595, height: 842 });
           if (pdfCanvasRef.current) {
             const canvas = pdfCanvasRef.current;
             const context = canvas.getContext('2d');
@@ -265,16 +267,24 @@ function TemplateCanvas({
     const rect = imgElement?.getBoundingClientRect();
     if (!rect) return;
     
-    const scaleX = imgSize.width / rect.width;
-    const scaleY = imgSize.height / rect.height;
+    // Calculate position in A4 space (595x842)
+    const A4_WIDTH = 595;
+    const A4_HEIGHT = 842;
+    const scaleX = A4_WIDTH / rect.width;
+    const scaleY = A4_HEIGHT / rect.height;
     let x = (e.clientX - rect.left) * scaleX;
     let y = (e.clientY - rect.top) * scaleY;
     
-    // Apply grid snapping
+    // Apply grid snapping in A4 space
     x = snapToGridCoord(x);
     y = snapToGridCoord(y);
     
-    onAddField('number', { x, y });
+    // Store as relative coordinates (0-1 fraction of cell)
+    const rx = x / A4_WIDTH;
+    const ry = y / A4_HEIGHT;
+    
+    // Pass both absolute (for backward compat) and relative
+    onAddField('number', { x, y, rx, ry });
   };
 
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
@@ -310,8 +320,11 @@ function TemplateCanvas({
     const rect = imgElement?.getBoundingClientRect();
     const field = fields.find(f => f.id === fieldId);
     if (rect && field && !isCtrlKey) {
-      const scaleX = imgSize.width / rect.width;
-      const scaleY = imgSize.height / rect.height;
+      // Use A4 dimensions for drag offset calculation
+      const A4_WIDTH = 595;
+      const A4_HEIGHT = 842;
+      const scaleX = A4_WIDTH / rect.width;
+      const scaleY = A4_HEIGHT / rect.height;
       setDragOffset({
         x: (e.clientX - rect.left) * scaleX - field.x,
         y: (e.clientY - rect.top) * scaleY - field.y
@@ -325,9 +338,11 @@ function TemplateCanvas({
       const imgElement = canvasRef.current?.querySelector('img, canvas') as HTMLElement | null;
       const rect = imgElement?.getBoundingClientRect() || canvasRef.current.getBoundingClientRect();
       
-      // Calculate position relative to the element (same as handleCanvasClick)
-      const scaleX = imgSize.width / rect.width;
-      const scaleY = imgSize.height / rect.height;
+      // Calculate position using A4 dimensions
+      const A4_WIDTH = 595;
+      const A4_HEIGHT = 842;
+      const scaleX = A4_WIDTH / rect.width;
+      const scaleY = A4_HEIGHT / rect.height;
       const templateX = (e.clientX - rect.left) * scaleX;
       const templateY = (e.clientY - rect.top) * scaleY;
       
@@ -356,8 +371,11 @@ function TemplateCanvas({
     const rect = imgElement?.getBoundingClientRect();
     if (!rect) return;
     
-    const scaleX = imgSize.width / rect.width;
-    const scaleY = imgSize.height / rect.height;
+    // Use A4 dimensions for dragging
+    const A4_WIDTH = 595;
+    const A4_HEIGHT = 842;
+    const scaleX = A4_WIDTH / rect.width;
+    const scaleY = A4_HEIGHT / rect.height;
     let x = (e.clientX - rect.left) * scaleX - dragOffset.x;
     let y = (e.clientY - rect.top) * scaleY - dragOffset.y;
     
@@ -373,7 +391,11 @@ function TemplateCanvas({
     x = snapToGridCoord(x);
     y = snapToGridCoord(y);
     
-    updateField(isDragging, { x, y });
+    // Calculate relative coordinates
+    const rx = x / A4_WIDTH;
+    const ry = y / A4_HEIGHT;
+    
+    updateField(isDragging, { x, y, rx, ry });
   };
 
   const handleMouseUp = () => {
@@ -382,14 +404,17 @@ function TemplateCanvas({
       const imgElement = canvasRef.current?.querySelector('img, canvas') as HTMLElement | null;
       const rect = imgElement?.getBoundingClientRect();
       if (rect) {
-        const scaleX = imgSize.width / rect.width;
-        const scaleY = imgSize.height / rect.height;
+        // Use A4 dimensions for selection
+        const A4_WIDTH = 595;
+        const A4_HEIGHT = 842;
+        const scaleX = A4_WIDTH / rect.width;
+        const scaleY = A4_HEIGHT / rect.height;
         
         // Calculate selection box in template coordinates
-        const left = Math.min(selectionBox.start.x, selectionBox.end.x) / (rect.width / imgSize.width);
-        const right = Math.max(selectionBox.start.x, selectionBox.end.x) / (rect.width / imgSize.width);
-        const top = Math.min(selectionBox.start.y, selectionBox.end.y) / (rect.height / imgSize.height);
-        const bottom = Math.max(selectionBox.start.y, selectionBox.end.y) / (rect.height / imgSize.height);
+        const left = Math.min(selectionBox.start.x, selectionBox.end.x) * scaleX;
+        const right = Math.max(selectionBox.start.x, selectionBox.end.x) * scaleX;
+        const top = Math.min(selectionBox.start.y, selectionBox.end.y) * scaleY;
+        const bottom = Math.max(selectionBox.start.y, selectionBox.end.y) * scaleY;
         
         // Select fields within the box
         const selectedIds = fields
@@ -425,7 +450,10 @@ function TemplateCanvas({
   useEffect(() => {
     if (templateUrl && templateFile?.type.startsWith('image/')) {
       const img = new Image();
-      img.onload = () => setImgSize({ width: img.naturalWidth, height: img.naturalHeight });
+      img.onload = () => {
+        // Force A4 dimensions for consistent coordinate system
+        setImgSize({ width: 595, height: 842 });
+      };
       img.src = templateUrl;
     }
   }, [templateUrl, templateFile]);
@@ -441,15 +469,17 @@ function TemplateCanvas({
     if (!showGrid) return null;
     const lines = [];
     const scaledGridSize = gridSize;
+    const A4_WIDTH = 595;
+    const A4_HEIGHT = 842;
     
-    for (let x = 0; x <= imgSize.width; x += scaledGridSize) {
+    for (let x = 0; x <= A4_WIDTH; x += scaledGridSize) {
       lines.push(
-        <div key={`v-${x}`} className="absolute bg-blue-400/20" style={{ left: x * zoomLevel, top: 0, width: 1, height: imgSize.height * zoomLevel }} />
+        <div key={`v-${x}`} className="absolute bg-blue-400/20" style={{ left: x * zoomLevel, top: 0, width: 1, height: A4_HEIGHT * zoomLevel }} />
       );
     }
-    for (let y = 0; y <= imgSize.height; y += scaledGridSize) {
+    for (let y = 0; y <= A4_HEIGHT; y += scaledGridSize) {
       lines.push(
-        <div key={`h-${y}`} className="absolute bg-blue-400/20" style={{ left: 0, top: y * zoomLevel, width: imgSize.width * zoomLevel, height: 1 }} />
+        <div key={`h-${y}`} className="absolute bg-blue-400/20" style={{ left: 0, top: y * zoomLevel, width: A4_WIDTH * zoomLevel, height: 1 }} />
       );
     }
     return lines;
@@ -458,13 +488,15 @@ function TemplateCanvas({
   // Render smart guides
   const renderSmartGuides = () => {
     if (!smartGuides.x && !smartGuides.y) return null;
+    const A4_WIDTH = 595;
+    const A4_HEIGHT = 842;
     return (
       <>
         {smartGuides.x !== null && (
-          <div className="absolute bg-blue-500/50 z-10 pointer-events-none" style={{ left: smartGuides.x * zoomLevel, top: 0, width: 1, height: imgSize.height * zoomLevel }} />
+          <div className="absolute bg-blue-500/50 z-10 pointer-events-none" style={{ left: smartGuides.x * zoomLevel, top: 0, width: 1, height: A4_HEIGHT * zoomLevel }} />
         )}
         {smartGuides.y !== null && (
-          <div className="absolute bg-blue-500/50 z-10 pointer-events-none" style={{ left: 0, top: smartGuides.y * zoomLevel, width: imgSize.width * zoomLevel, height: 1 }} />
+          <div className="absolute bg-blue-500/50 z-10 pointer-events-none" style={{ left: 0, top: smartGuides.y * zoomLevel, width: A4_WIDTH * zoomLevel, height: 1 }} />
         )}
       </>
     );
@@ -667,13 +699,13 @@ function TemplateCanvas({
           </div>
         )}
         
-        {/* Ghost preview */}
+        {/* Ghost preview - centered on crosshair */}
         <div 
           className="absolute pointer-events-none"
           style={{ 
             left: centerX, 
             top: centerY,
-            transform: 'translate(-50%, calc(-50% - 2px))',
+            transform: 'translate(-50%, -50%)',
             fontFamily: 'CrashNumberingSerif',
             fontWeight: 'bold',
             color: '#FF0000',
@@ -785,16 +817,22 @@ function TemplateCanvas({
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
         >
-          <div className="grid gap-1 bg-white p-1" style={{ gridTemplateColumns: `repeat(${leafletCols}, 1fr)`, gridTemplateRows: `repeat(${leafletRows}, 1fr)` }}>
+          <div className="grid gap-1 bg-white p-1" style={{ gridTemplateColumns: `repeat(${leafletCols}, 595px)`, gridTemplateRows: `repeat(${leafletRows}, 842px)` }}>
             {Array.from({ length: leafletsPerPage }, (_, leafletIndex) => (
-              <div key={leafletIndex} className="relative">
+              <div key={leafletIndex} className="relative" style={{ width: 595, height: 842 }}>
                 {templateFile?.type.startsWith('image/') ? (
-                  <img src={templateUrl} alt={`Template ${leafletIndex + 1}`} className={cn("w-full h-auto", templateBlackAndWhite && "grayscale")} style={{ filter: templateBlackAndWhite ? 'grayscale(100%) contrast(1.2)' : undefined }} draggable={false} />
+                  <img src={templateUrl} alt={`Template ${leafletIndex + 1}`} className={cn("w-[595px] h-[842px] object-contain", templateBlackAndWhite && "grayscale")} style={{ filter: templateBlackAndWhite ? 'grayscale(100%) contrast(1.2)' : undefined }} draggable={false} />
                 ) : templateFile?.type === 'application/pdf' ? (
-                  <canvas className={cn("w-full h-auto", templateBlackAndWhite && "grayscale")} style={{ filter: templateBlackAndWhite ? 'grayscale(100%) contrast(1.2)' : undefined }} />
+                  <canvas className={cn("w-[595px] h-[842px] object-contain", templateBlackAndWhite && "grayscale")} style={{ filter: templateBlackAndWhite ? 'grayscale(100%) contrast(1.2)' : undefined }} />
                 ) : null}
                 
                 {fields.map((field) => {
+                  // Calculate position from relative coordinates
+                  const A4_WIDTH = 595;
+                  const A4_HEIGHT = 842;
+                  const fieldX = (field.rx ?? field.x / A4_WIDTH) * A4_WIDTH;
+                  const fieldY = (field.ry ?? field.y / A4_HEIGHT) * A4_HEIGHT;
+                  
                   const leafletNumber = fromNumber + leafletIndex;
                   const isNumberField = field.type === 'number';
                   let displayText = '';
@@ -811,7 +849,7 @@ function TemplateCanvas({
                       key={`${field.id}-${leafletIndex}`}
                       data-field
                       className={cn("absolute select-none transition-shadow", isSelected && "z-20", interactionMode === 'place_point' && "pointer-events-none")}
-                      style={{ left: field.x, top: field.y, transform: 'translate(-50%, -50%)' }}
+                      style={{ left: fieldX, top: fieldY, transform: 'translate(-50%, -50%)' }}
                       onMouseDown={(e) => handleFieldMouseDown(e, field.id)}
                       onMouseEnter={() => setHoveredField(field.id)}
                       onMouseLeave={() => setHoveredField(null)}
@@ -859,9 +897,9 @@ function TemplateCanvas({
         onMouseLeave={handleMouseUp}
       >
         {templateFile?.type.startsWith('image/') ? (
-          <img src={templateUrl} alt="Template" className={cn("max-w-full max-h-[calc(100vh-180px)] object-contain", templateBlackAndWhite && "grayscale")} style={{ filter: templateBlackAndWhite ? 'grayscale(100%) contrast(1.2)' : undefined }} draggable={false} />
+          <img src={templateUrl} alt="Template" className={cn("w-[595px] h-[842px] object-contain", templateBlackAndWhite && "grayscale")} style={{ filter: templateBlackAndWhite ? 'grayscale(100%) contrast(1.2)' : undefined }} draggable={false} />
         ) : templateFile?.type === 'application/pdf' ? (
-          <canvas ref={pdfCanvasRef} className={cn("max-w-full max-h-[calc(100vh-180px)] object-contain", templateBlackAndWhite && "grayscale")} style={{ filter: templateBlackAndWhite ? 'grayscale(100%) contrast(1.2)' : undefined }} />
+          <canvas ref={pdfCanvasRef} className={cn("w-[595px] h-[842px] object-contain", templateBlackAndWhite && "grayscale")} style={{ filter: templateBlackAndWhite ? 'grayscale(100%) contrast(1.2)' : undefined }} />
         ) : (
           <div className="w-[595px] h-[842px] bg-gray-800 flex items-center justify-center"><p className="text-gray-500">Template Preview</p></div>
         )}
@@ -873,6 +911,12 @@ function TemplateCanvas({
         {renderSmartGuides()}
         
         {fields.map((field) => {
+          // Calculate position from relative coordinates
+          const A4_WIDTH = 595;
+          const A4_HEIGHT = 842;
+          const fieldX = (field.rx ?? field.x / A4_WIDTH) * A4_WIDTH;
+          const fieldY = (field.ry ?? field.y / A4_HEIGHT) * A4_HEIGHT;
+          
           const isSelected = selectedFieldIds.includes(field.id);
           const isBeingNudged = isSelected && nudgeDirection;
           
@@ -887,8 +931,8 @@ function TemplateCanvas({
                 interactionMode === 'place_point' && "pointer-events-none"
               )}
               style={{ 
-                left: field.x, 
-                top: field.y,
+                left: fieldX, 
+                top: fieldY,
                 transform: isBeingNudged 
                   ? `translate(-50%, -50%) translate(${nudgeDirection.x * 2}px, ${nudgeDirection.y * 2}px)` 
                   : 'translate(-50%, -50%)',
@@ -898,21 +942,35 @@ function TemplateCanvas({
               onMouseEnter={() => setHoveredField(field.id)}
               onMouseLeave={() => setHoveredField(null)}
             >
-              {/* Delete button */}
+              {/* Minimal modern selection controls - handles fit to content */}
               {isSelected && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); removeField(field.id); }}
-                  className="absolute -top-6 -right-6 w-5 h-5 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center text-xs font-bold shadow-lg z-50 transition-colors"
-                  title="Delete field"
-                >
-                  ×
-                </button>
+                <>
+                  {/* Selection border touching content */}
+                  <div className="absolute inset-0 border border-blue-400/60 rounded-sm pointer-events-none" />
+                  
+                  {/* Corner handles - touching the number content */}
+                  <div className="absolute top-0 left-0 w-2 h-2 bg-blue-500 rounded-full -translate-x-1/2 -translate-y-1/2 cursor-nw-resize hover:scale-150 transition-transform" />
+                  <div className="absolute top-0 right-0 w-2 h-2 bg-blue-500 rounded-full translate-x-1/2 -translate-y-1/2 cursor-ne-resize hover:scale-150 transition-transform" />
+                  <div className="absolute bottom-0 left-0 w-2 h-2 bg-blue-500 rounded-full -translate-x-1/2 translate-y-1/2 cursor-sw-resize hover:scale-150 transition-transform" />
+                  <div className="absolute bottom-0 right-0 w-2 h-2 bg-blue-500 rounded-full translate-x-1/2 translate-y-1/2 cursor-se-resize hover:scale-150 transition-transform" />
+                  
+                  {/* Delete button - close to content */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); removeField(field.id); }}
+                    className="absolute -top-3 -right-3 w-4 h-4 bg-red-500/90 hover:bg-red-500 text-white rounded-full flex items-center justify-center text-[10px] shadow-sm z-50 transition-all hover:scale-110"
+                    title="Delete"
+                  >
+                    ×
+                  </button>
+                </>
               )}
               
-              <div className={cn("cursor-move", isSelected && "ring-2 ring-blue-500")}>
+              <div className={cn("relative cursor-move inline-block", isSelected && "ring-1 ring-blue-400/30 rounded")}>
                 {field.type === 'number' && (() => {
-                  const pointIndex = parseInt(field.label.replace(/\D/g, '')) || 1;
-                  const actualNumber = fromNumber + (pointIndex - 1);
+                  // Get index of this number field among all number fields (continuous numbering)
+                  const numberFields = fields.filter(f => f.type === 'number');
+                  const fieldIndex = numberFields.findIndex(f => f.id === field.id);
+                  const actualNumber = fromNumber + fieldIndex;
                   const baseNumber = String(actualNumber).padStart(zeroPadding, '0');
                   const displayText = `${numberingPrefix}${numberingSeparator}${numberingYear}${numberingSeparator}${baseNumber}`;
                   return (
@@ -1043,7 +1101,8 @@ export default function App() {
     interactionMode, setInteractionMode,
     snapToGrid, setSnapToGrid, gridSize, setGridSize,
     zoomLevel, setZoomLevel, showCoordinates, setShowCoordinates,
-    showGrid, setShowGrid
+    showGrid, setShowGrid,
+    canvasDimensions
   } = store;
 
   const { undo, redo } = useStore.temporal.getState();
@@ -1152,13 +1211,26 @@ export default function App() {
     setCsvData(data, headers);
   };
 
-  const handleAddField = (type: 'text' | 'number' | 'image', position?: { x: number; y: number }) => {
+  const handleAddField = (type: 'text' | 'number' | 'image', position?: { x: number; y: number; rx?: number; ry?: number }) => {
+    const A4_WIDTH = 595;
+    const A4_HEIGHT = 842;
+    
+    // Use relative coordinates if provided, otherwise calculate from absolute or use defaults
+    const rx = position?.rx ?? (position?.x ? position.x / A4_WIDTH : 0.168); // 100/595 ≈ 0.168
+    const ry = position?.ry ?? (position?.y ? position.y / A4_HEIGHT : 0.119); // 100/842 ≈ 0.119
+    
+    // Calculate absolute for backward compatibility
+    const x = position?.x ?? rx * A4_WIDTH;
+    const y = position?.y ?? ry * A4_HEIGHT;
+    
     const newField: FieldConfig = {
       id: `field-${Date.now()}`,
       type,
       label: type === 'number' ? `P${pointCounter}` : type === 'image' ? 'Photo' : 'Text',
-      x: position?.x ?? 100,
-      y: position?.y ?? 100,
+      x,
+      y,
+      rx,
+      ry,
       fontSize: 20,
       fontFamily: 'CrashNumberingSerif',
       color: '#FF0000',
@@ -1318,38 +1390,54 @@ export default function App() {
         
         if (isMultiLeaflet) {
           // Multi-leaflet layout: create a larger page with multiple templates
-          const totalWidth = pageWidth * leafletCols;
-          const totalHeight = pageHeight * leafletRows;
+          // Use A4 dimensions for consistent coordinate system
+          const A4_WIDTH = 595;
+          const A4_HEIGHT = 842;
+          const totalWidth = A4_WIDTH * leafletCols;
+          const totalHeight = A4_HEIGHT * leafletRows;
           page = outputPdf.addPage([totalWidth, totalHeight]);
           
-          // Draw template for each leaflet position
+          // Draw template for each leaflet position (scaled to A4)
           for (let i = 0; i < leafletsPerPage; i++) {
             const col = i % leafletCols;
             const row = Math.floor(i / leafletCols);
-            const offsetX = col * pageWidth;
-            const offsetY = totalHeight - (row + 1) * pageHeight; // PDF coords from bottom
+            const offsetX = col * A4_WIDTH;
+            const offsetY = totalHeight - (row + 1) * A4_HEIGHT; // PDF coords from bottom
             
             if (sourcePdf) {
-              // For PDF templates, we need to embed and draw
+              // For PDF templates, we need to embed and draw (scaled to A4)
               if (templateImage) {
-                page.drawImage(templateImage, { x: offsetX, y: offsetY, width: pageWidth, height: pageHeight });
+                page.drawImage(templateImage, { x: offsetX, y: offsetY, width: A4_WIDTH, height: A4_HEIGHT });
               }
             } else if (templateImage) {
-              page.drawImage(templateImage, { x: offsetX, y: offsetY, width: pageWidth, height: pageHeight });
+              page.drawImage(templateImage, { x: offsetX, y: offsetY, width: A4_WIDTH, height: A4_HEIGHT });
             }
           }
           
-          // Draw number fields for each leaflet
+          // Draw fields on each leaflet
           for (let i = 0; i < leafletsPerPage; i++) {
-            if (shouldLoopReceipts && currentNumber > toNumber) break;
-            
             const col = i % leafletCols;
             const row = Math.floor(i / leafletCols);
-            const offsetX = col * pageWidth;
-            const offsetY = totalHeight - (row + 1) * pageHeight;
+            const offsetX = col * A4_WIDTH;
+            const offsetY = totalHeight - (row + 1) * A4_HEIGHT;
             
+            // Calculate the number for this leaflet position
+            const leafletNumber = fromNumber + i + (pageNum * leafletsPerPage);
+            if (leafletNumber > toNumber) continue;
+            
+            // Draw number fields on this leaflet
             for (const field of numberFields) {
-              const baseNumber = String(currentNumber).padStart(zeroPadding, '0');
+              // Calculate position from relative coordinates
+              const fieldX = (field.rx ?? field.x / A4_WIDTH) * A4_WIDTH;
+              const fieldY = (field.ry ?? field.y / A4_HEIGHT) * A4_HEIGHT;
+              
+              // Use same continuous numbering as preview (field index based)
+              const fieldIndex = numberFields.findIndex(f => f.id === field.id);
+              const actualNumber = fromNumber + fieldIndex;
+              
+              if (actualNumber > toNumber) continue;
+              
+              const baseNumber = String(actualNumber).padStart(zeroPadding, '0');
               const text = `${numberingPrefix}${numberingSeparator}${numberingYear}${numberingSeparator}${baseNumber}`;
               const hex = field.color.replace('#', '');
               const r = parseInt(hex.substring(0, 2), 16) / 255;
@@ -1359,16 +1447,13 @@ export default function App() {
               const font = getFont(field);
               const textWidth = font.widthOfTextAtSize(text, field.fontSize);
               
-              let x = field.x + offsetX;
-              if (field.align === 'center') {
-                x = field.x - textWidth / 2 + offsetX;
-              } else if (field.align === 'right') {
-                x = field.x - textWidth + offsetX;
-              }
+              // Center text on field position (matching preview transform: translate(-50%, -50%))
+              const x = fieldX - textWidth / 2 + offsetX;
+              const pdfY = offsetY + A4_HEIGHT - fieldY - field.fontSize / 2;
               
               page.drawText(text, {
                 x: x,
-                y: offsetY + pageHeight - field.y - field.fontSize * 0.3,
+                y: pdfY,
                 size: field.fontSize,
                 font: font,
                 color: rgb(r, g, b),
@@ -1377,6 +1462,10 @@ export default function App() {
             
             // Draw static fields for this leaflet
             for (const field of staticFields) {
+              // Calculate position from relative coordinates
+              const fieldX = (field.rx ?? field.x / A4_WIDTH) * A4_WIDTH;
+              const fieldY = (field.ry ?? field.y / A4_HEIGHT) * A4_HEIGHT;
+              
               let text = field.value || '';
               if (shouldLoopCertificates && field.dataKey && csvData[csvRowIndex]) {
                 text = csvData[csvRowIndex][field.dataKey] || text;
@@ -1390,16 +1479,13 @@ export default function App() {
                 const font = getFont(field);
                 const textWidth = font.widthOfTextAtSize(text, field.fontSize);
                 
-                let x = field.x + offsetX;
-                if (field.align === 'center') {
-                  x = field.x - textWidth / 2 + offsetX;
-                } else if (field.align === 'right') {
-                  x = field.x - textWidth + offsetX;
-                }
+                // Center text on field position (matching preview transform: translate(-50%, -50%))
+                const x = fieldX - textWidth / 2 + offsetX;
+                const pdfY = offsetY + A4_HEIGHT - fieldY - field.fontSize / 2;
                 
                 page.drawText(text, {
                   x: x,
-                  y: offsetY + pageHeight - field.y - field.fontSize * 0.3,
+                  y: pdfY,
                   size: field.fontSize,
                   font: font,
                   color: rgb(r, g, b),
@@ -1407,27 +1493,37 @@ export default function App() {
               }
             }
             
-            if (shouldLoopReceipts) currentNumber++;
+            if (shouldLoopCertificates) csvRowIndex++;
           }
           
-          if (shouldLoopCertificates) csvRowIndex++;
         } else {
-          // Single leaflet per page (original behavior)
+          // Single leaflet per page - use A4 dimensions
+          const A4_WIDTH = 595;
+          const A4_HEIGHT = 842;
+          
           if (sourcePdf) {
             const [copiedPage] = await outputPdf.copyPages(sourcePdf, [0]);
             page = outputPdf.addPage(copiedPage);
           } else {
-            page = outputPdf.addPage([pageWidth, pageHeight]);
-            if (templateImage) page.drawImage(templateImage, { x: 0, y: 0, width: pageWidth, height: pageHeight });
+            page = outputPdf.addPage([A4_WIDTH, A4_HEIGHT]);
+            if (templateImage) page.drawImage(templateImage, { x: 0, y: 0, width: A4_WIDTH, height: A4_HEIGHT });
           }
           
           const currentDataRow = shouldLoopCertificates ? csvData[csvRowIndex] : null;
 
           // Draw number fields
           for (const field of numberFields) {
-            if (shouldLoopReceipts && currentNumber > toNumber) break;
+            // Calculate position from relative coordinates
+            const fieldX = (field.rx ?? field.x / A4_WIDTH) * A4_WIDTH;
+            const fieldY = (field.ry ?? field.y / A4_HEIGHT) * A4_HEIGHT;
             
-            const baseNumber = String(currentNumber).padStart(zeroPadding, '0');
+            // Use same continuous numbering as preview (field index based)
+            const fieldIndex = numberFields.findIndex(f => f.id === field.id);
+            const actualNumber = fromNumber + fieldIndex;
+            
+            if (shouldLoopReceipts && actualNumber > toNumber) break;
+            
+            const baseNumber = String(actualNumber).padStart(zeroPadding, '0');
             const text = `${numberingPrefix}${numberingSeparator}${numberingYear}${numberingSeparator}${baseNumber}`;
             const hex = field.color.replace('#', '');
             const r = parseInt(hex.substring(0, 2), 16) / 255;
@@ -1437,25 +1533,25 @@ export default function App() {
             const font = getFont(field);
             const textWidth = font.widthOfTextAtSize(text, field.fontSize);
             
-            let x = field.x;
-            if (field.align === 'center') {
-              x = field.x - textWidth / 2;
-            } else if (field.align === 'right') {
-              x = field.x - textWidth;
-            }
+            // Center text on field position (matching preview transform: translate(-50%, -50%))
+            const x = fieldX - textWidth / 2;
+            const pdfY = A4_HEIGHT - fieldY - field.fontSize / 2;
             
             page.drawText(text, {
               x: x,
-              y: pageHeight - field.y - field.fontSize * 0.3,
+              y: pdfY,
               size: field.fontSize,
               font: font,
               color: rgb(r, g, b),
             });
-            if (shouldLoopReceipts) currentNumber++;
           }
 
           // Draw static fields
           for (const field of staticFields) {
+            // Calculate position from relative coordinates
+            const fieldX = (field.rx ?? field.x / A4_WIDTH) * A4_WIDTH;
+            const fieldY = (field.ry ?? field.y / A4_HEIGHT) * A4_HEIGHT;
+            
             let text = field.value || '';
             if (shouldLoopCertificates && field.dataKey && currentDataRow) {
               text = currentDataRow[field.dataKey] || text;
@@ -1469,16 +1565,13 @@ export default function App() {
               const font = getFont(field);
               const textWidth = font.widthOfTextAtSize(text, field.fontSize);
               
-              let x = field.x;
-              if (field.align === 'center') {
-                x = field.x - textWidth / 2;
-              } else if (field.align === 'right') {
-                x = field.x - textWidth;
-              }
+              // Center text on field position (matching preview transform: translate(-50%, -50%))
+              const x = fieldX - textWidth / 2;
+              const pdfY = A4_HEIGHT - fieldY - field.fontSize / 2;
               
               page.drawText(text, {
                 x: x,
-                y: pageHeight - field.y - field.fontSize * 0.3,
+                y: pdfY,
                 size: field.fontSize,
                 font: font,
                 color: rgb(r, g, b),
@@ -1970,6 +2063,7 @@ export default function App() {
             setZoomLevel={setZoomLevel}
             showCoordinates={showCoordinates}
             showGrid={showGrid}
+            canvasDimensions={canvasDimensions}
           />
         </div>
       </div>
