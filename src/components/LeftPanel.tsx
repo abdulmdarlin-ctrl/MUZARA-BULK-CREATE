@@ -1,0 +1,1818 @@
+import React, { useCallback, useEffect, useState } from 'react';
+import { useDropzone } from 'react-dropzone';
+import JSZip from 'jszip';
+import { useStore, FieldConfig } from '../store';
+import { FileUp, FileText, Award, IdCard, Plus, Hash, Image as ImageIcon, MousePointer2, Upload, Database, Layout, Zap, Download, Trash2, Undo2, Redo2, Type, AlignLeft, AlignCenter, AlignRight, Bold, Minus } from 'lucide-react';
+import { clsx } from 'clsx';
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
+import { LoadingSpinner, Skeleton } from './LoadingScreen';
+
+export function LeftPanel() {
+  // TabButton component
+  const TabButton = ({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) => {
+    const [isHovered, setIsHovered] = useState(false);
+
+    return (
+      <button
+        onClick={onClick}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+        className={clsx(
+          "relative flex items-center gap-2 px-4 py-2.5 rounded-t-lg text-sm font-medium transition-all duration-200 ease-out whitespace-nowrap",
+          "transform hover:scale-105",
+          active 
+            ? "text-white bg-gradient-to-b from-white/10 to-white/5 border-t border-x border-white/20 shadow-lg" 
+            : "text-gray-400 hover:text-white hover:bg-white/5 border-t border-x border-transparent"
+        )}
+      >
+        {/* Hover Effect */}
+        {!active && isHovered && (
+          <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent rounded-t-lg" />
+        )}
+        
+        {/* Active State Glow */}
+        {active && (
+          <div className="absolute inset-0 bg-gradient-to-b from-blue-500/10 to-purple-500/10 rounded-t-lg" />
+        )}
+        
+        {/* Icon with Animation */}
+        <span className={clsx(
+          "transition-transform duration-200",
+          active ? "scale-110" : "scale-100",
+          isHovered && !active ? "rotate-12" : "rotate-0"
+        )}>
+          {icon}
+        </span>
+        
+        {/* Label */}
+        <span className="relative z-10">{label}</span>
+        
+        {/* Active Indicator Dot */}
+        {active && (
+          <div className="absolute -top-0.5 right-2 w-1.5 h-1.5 bg-gradient-to-r from-blue-400 to-purple-400 rounded-full animate-pulse" />
+        )}
+      </button>
+    );
+  };
+
+  const { 
+    bulkType, setBulkType, setTemplate, templateUrl, addField, interactionMode, setInteractionMode, addCustomFont,
+    fromNumber, toNumber, zeroPadding, setNumbering,
+    numberingPrefix, numberingYear, numberingSeparator, setCustomNumbering,
+    setCsvData, csvHeaders, csvData = [],
+    fields = [], selectedFieldId, setSelectedFieldId, updateField, removeField,
+    leafletsPerPage, columns, rows, orientation, setLayout,
+    templateFile, customFonts, setGeneratedPdfUrl,
+    extractedImages = {}, setExtractedImages,
+    canvasDimensions = { width: 500, height: 700 },
+    pointCounter, setPointCounter,
+    templateBlackAndWhite, setTemplateBlackAndWhite,
+    pagesToGenerate, setPagesToGenerate,
+    onMount
+  } = useStore();
+  
+  const { undo, redo, pastStates, futureStates } = useStore.temporal.getState();
+
+  // Run migration on component mount
+  useEffect(() => {
+    onMount();
+  }, [onMount]);
+
+  // Keyboard shortcuts for undo/redo
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle shortcuts when not typing in an input
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.contentEditable === 'true') {
+        return;
+      }
+      
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        e.preventDefault();
+        undo();
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+        e.preventDefault();
+        redo();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [undo, redo]);
+
+  const [activeTab, setActiveTab] = useState<'data' | 'typography' | 'layout'>('data');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [lastSelectedFieldId, setLastSelectedFieldId] = useState<string | null>(null);
+  const [isTabLoading, setIsTabLoading] = useState(false);
+
+  const selectedField = fields.find(f => f.id === selectedFieldId);
+
+  // Maintain last selected field when in typography tab
+  useEffect(() => {
+    if (selectedFieldId && activeTab === 'typography') {
+      setLastSelectedFieldId(selectedFieldId);
+    }
+  }, [selectedFieldId, activeTab]);
+
+  // Restore field selection when switching back to typography tab
+  useEffect(() => {
+    if (activeTab === 'typography' && lastSelectedFieldId && !selectedFieldId) {
+      setSelectedFieldId(lastSelectedFieldId);
+    }
+  }, [activeTab, lastSelectedFieldId, selectedFieldId]);
+
+  const onDrop = useCallback((acceptedFiles: File[]) => {
+    if (acceptedFiles.length > 0) {
+      const file = acceptedFiles[0];
+      const url = URL.createObjectURL(file);
+      setTemplate(file, url);
+    }
+  }, [setTemplate]);
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: {
+      'image/*': ['.png', '.jpg', '.jpeg'],
+      'application/pdf': ['.pdf']
+    },
+    maxFiles: 1,
+    multiple: false,
+    onDragEnter: () => {},
+    onDragOver: () => {},
+    onDragLeave: () => {}
+  });
+
+  const handleFontUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const fontName = file.name.split('.')[0];
+      const fontUrl = URL.createObjectURL(file);
+      
+      // Load font into browser
+      const fontFace = new FontFace(fontName, `url(${fontUrl})`);
+      try {
+        await fontFace.load();
+        document.fonts.add(fontFace);
+        addCustomFont({ name: fontName, url: fontUrl, file });
+        alert(`Font "${fontName}" loaded successfully!`);
+      } catch (err) {
+        console.error("Failed to load font", err);
+        alert("Failed to load font. Please check the file.");
+      }
+    }
+  };
+
+  const handleAddField = (type: 'text' | 'number' | 'image') => {
+    // Ensure we are in select mode so user can interact with new field
+    if (interactionMode !== 'select') {
+      setInteractionMode('select');
+    }
+    
+    const newField: FieldConfig = {
+      id: `field-${Date.now()}`,
+      type,
+      label: type === 'number' ? `P${pointCounter}` : type === 'image' ? 'Photo' : 'Text',
+      x: 50,
+      y: 50,
+      fontSize: 16,
+      fontFamily: 'CrashNumberingSerif',
+      color: '#000000',
+      bold: false,
+      align: 'left',
+      value: type === 'number' ? `P${pointCounter}` : 'Sample Text',
+      dataKey: type === 'number' ? `P${pointCounter}` : undefined,
+      width: type === 'image' ? 100 : undefined,
+      height: type === 'image' ? 100 : undefined,
+    };
+    
+    addField(newField);
+    if (type === 'number') {
+      setPointCounter(pointCounter + 1);
+    }
+  };
+
+  const handleDataUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    // Check if it's a ZIP file
+    if (file.name.endsWith('.zip')) {
+      await handleZipUpload(file);
+      return;
+    }
+    
+    // Handle regular CSV
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const csvText = event.target?.result as string;
+      if (!csvText) return;
+      parseAndLoadCsv(csvText);
+    };
+    reader.readAsText(file);
+  };
+  
+  const handleZipUpload = async (file: File) => {
+    try {
+      const zip = await JSZip.loadAsync(file);
+      const images: Record<string, ArrayBuffer> = {};
+      let csvContent: string | null = null;
+      
+      // Find and extract files
+      for (const [path, zipEntry] of Object.entries(zip.files)) {
+        // Skip directories
+        if (zipEntry.dir) continue;
+        
+        // Find CSV file
+        if (path.endsWith('.csv') && !csvContent) {
+          csvContent = await zipEntry.async('text');
+        }
+        
+        // Find image files
+        if (/\.(jpg|jpeg|png|gif|webp)$/i.test(path)) {
+          const fileName = path.split('/').pop()?.toLowerCase() || '';
+          const imageData = await zipEntry.async('arraybuffer');
+          images[fileName] = imageData;
+          images[path.toLowerCase()] = imageData; // Also store with full path
+        }
+      }
+      
+      if (!csvContent) {
+        alert('No CSV file found in ZIP. Please include a CSV file.');
+        return;
+      }
+      
+      // Store extracted images
+      setExtractedImages(images);
+      
+      // Parse CSV
+      parseAndLoadCsv(csvContent, images);
+      
+      alert(`ZIP loaded: ${Object.keys(images).length} images, CSV data extracted`);
+    } catch (error) {
+      console.error('Error parsing ZIP:', error);
+      alert('Failed to parse ZIP file. Please check the file format.');
+    }
+  };
+  
+  const parseAndLoadCsv = (csvText: string, images?: Record<string, ArrayBuffer>) => {
+    // Parse CSV
+    const lines = csvText.split('\n').filter(line => line.trim());
+    if (lines.length === 0) return;
+    
+    // Parse headers (first row)
+    const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+    
+    // Parse data rows
+    const data: any[] = [];
+    for (let i = 1; i < lines.length; i++) {
+      const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+      const row: any = {};
+      headers.forEach((header, index) => {
+        row[header] = values[index] || '';
+      });
+      data.push(row);
+    }
+    
+    // Store CSV data
+    setCsvData(data, headers);
+    
+    // For certificates, auto-create fields based on CSV headers
+    if (bulkType === 'certificates') {
+      // Find name column (look for name, fullname, full_name)
+      const nameHeader = headers.find(h => 
+        h.toLowerCase().includes('name') && !h.toLowerCase().includes('file')
+      ) || headers[0];
+      
+      // Find title/responsibility column
+      const titleHeader = headers.find(h => 
+        h.toLowerCase().includes('title') || 
+        h.toLowerCase().includes('role') || 
+        h.toLowerCase().includes('position') ||
+        h.toLowerCase().includes('responsibility')
+      ) || headers[1];
+      
+      // Find photo/image column
+      const photoHeader = headers.find(h => 
+        h.toLowerCase().includes('photo') || 
+        h.toLowerCase().includes('image') || 
+        h.toLowerCase().includes('picture') ||
+        h.toLowerCase().includes('img')
+      );
+      
+      // Clear existing fields first
+      fields.forEach(f => removeField(f.id));
+      
+      // Add name field
+      addField({
+        id: 'field_name',
+        type: 'text',
+        label: 'Name',
+        x: 250,
+        y: 200,
+        width: 200,
+        height: 30,
+        fontSize: 24,
+        fontFamily: 'Helvetica',
+        color: '#000000',
+        bold: true,
+        align: 'center',
+        value: data[0]?.[nameHeader] || 'Sample Name',
+        dataKey: nameHeader
+      });
+      
+      // Add title field if found
+      if (titleHeader) {
+        addField({
+          id: 'field_title',
+          type: 'text',
+          label: 'Title',
+          x: 250,
+          y: 240,
+          width: 200,
+          height: 20,
+          fontSize: 16,
+          fontFamily: 'Helvetica',
+          color: '#333333',
+          bold: false,
+          align: 'center',
+          value: data[0]?.[titleHeader] || 'Sample Title',
+          dataKey: titleHeader
+        });
+      }
+      
+      // Add photo field if found
+      if (photoHeader) {
+        addField({
+          id: 'field_photo',
+          type: 'image',
+          label: 'Photo',
+          x: 100,
+          y: 150,
+          width: 100,
+          height: 120,
+          fontSize: 12,
+          fontFamily: 'Helvetica',
+          color: '#000000',
+          bold: false,
+          align: 'left',
+          value: data[0]?.[photoHeader] || '',
+          dataKey: photoHeader
+        });
+      }
+    }
+  };
+
+  const handleGenerate = async () => {
+    setIsGenerating(true);
+    try {
+      // Helper function to convert image to grayscale
+      const convertToGrayscale = async (imageBytes: ArrayBuffer, mimeType: string): Promise<Uint8Array> => {
+        return new Promise((resolve, reject) => {
+          const img = new Image();
+          const blob = new Blob([imageBytes], { type: mimeType });
+          const url = URL.createObjectURL(blob);
+          
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d')!;
+            
+            // Draw image
+            ctx.drawImage(img, 0, 0);
+            
+            // Get image data and convert to grayscale
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            
+            for (let i = 0; i < data.length; i += 4) {
+              const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+              data[i] = gray;     // Red
+              data[i + 1] = gray; // Green
+              data[i + 2] = gray; // Blue
+              // Alpha (data[i + 3]) remains unchanged
+            }
+            
+            ctx.putImageData(imageData, 0, 0);
+            
+            // Convert to blob with compression for JPEGs
+            canvas.toBlob((blob) => {
+              if (blob) {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                  const arrayBuffer = reader.result as ArrayBuffer;
+                  resolve(new Uint8Array(arrayBuffer));
+                };
+                reader.readAsArrayBuffer(blob);
+              } else {
+                reject(new Error('Failed to create blob'));
+              }
+            }, mimeType, mimeType === 'image/jpeg' ? 0.85 : undefined);
+            
+            URL.revokeObjectURL(url);
+          };
+          
+          img.onerror = () => {
+            URL.revokeObjectURL(url);
+            reject(new Error('Failed to load image'));
+          };
+          
+          img.src = url;
+        });
+      };
+
+      // 1. Prepare the output PDF
+      const outputPdf = await PDFDocument.create();
+      
+      // 2. Prepare the template (Image or PDF Page)
+      let templateImage: any = null;
+      let sourcePdf: PDFDocument | null = null;
+      
+      // Default A4 dimensions
+      let pageWidth = 595.28;
+      let pageHeight = 841.89;
+
+      if (templateFile) {
+        const fileBytes = await templateFile.arrayBuffer();
+        
+        if (templateFile.type === 'application/pdf') {
+           sourcePdf = await PDFDocument.load(fileBytes);
+           const firstPage = sourcePdf.getPages()[0];
+           const { width, height } = firstPage.getSize();
+           pageWidth = width;
+           pageHeight = height;
+           
+           // Convert PDF to image for drawing on pages
+           // We'll use the PDF.js library to render it to a canvas first
+           try {
+             const pdfjsLib = await import('pdfjs-dist');
+             pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+             
+             const loadingTask = pdfjsLib.getDocument({ data: fileBytes });
+             const pdfDocument = await loadingTask.promise;
+             const pdfPage = await pdfDocument.getPage(1);
+             
+             const viewport = pdfPage.getViewport({ scale: 2.0 });
+             const canvas = document.createElement('canvas');
+             canvas.width = viewport.width;
+             canvas.height = viewport.height;
+             const context = canvas.getContext('2d')!;
+             
+             await pdfPage.render({ 
+              canvasContext: context, 
+              viewport,
+              canvas: canvas as any
+            }).promise;
+             
+             // Convert canvas to JPEG bytes (much smaller and faster than PNG)
+             const jpegData = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+             let imageBytes = Uint8Array.from(atob(jpegData), c => c.charCodeAt(0));
+             
+             // Apply grayscale if enabled for receipts
+             if (templateBlackAndWhite && bulkType === 'receipts') {
+               try {
+                 const grayscaleResult = await convertToGrayscale(imageBytes.buffer.slice(0), 'image/jpeg');
+                 imageBytes = new Uint8Array(grayscaleResult);
+               } catch (e) {
+                 console.error('Failed to convert PDF template to grayscale:', e);
+               }
+             }
+             
+             templateImage = await outputPdf.embedJpg(imageBytes);
+             
+             // Update dimensions to match the rendered image
+             pageWidth = viewport.width / 2; // Original size (not scaled)
+             pageHeight = viewport.height / 2;
+           } catch (e) {
+             console.error('Failed to convert PDF to image:', e);
+           }
+        } else if (templateFile.type.startsWith('image/')) {
+           let imageBytes: Uint8Array;
+           
+           // Apply grayscale if enabled for receipts
+           if (templateBlackAndWhite && bulkType === 'receipts') {
+             try {
+               const mimeType = templateFile.type === 'image/jpeg' ? 'image/jpeg' : 'image/png';
+               const grayscaleBytes = await convertToGrayscale(fileBytes, mimeType);
+               imageBytes = grayscaleBytes;
+             } catch (e) {
+               console.error('Failed to convert image to grayscale:', e);
+               imageBytes = new Uint8Array(fileBytes);
+             }
+           } else {
+             imageBytes = new Uint8Array(fileBytes);
+           }
+           
+           if (templateFile.type === 'image/jpeg') {
+             templateImage = await outputPdf.embedJpg(imageBytes);
+           } else {
+             templateImage = await outputPdf.embedPng(imageBytes);
+           }
+           // Use image dimensions for the page to ensure accurate mapping
+           pageWidth = templateImage.width;
+           pageHeight = templateImage.height;
+        }
+      }
+
+      // 3. Embed Fonts
+      const helvetica = await outputPdf.embedFont(StandardFonts.Helvetica);
+      const helveticaBold = await outputPdf.embedFont(StandardFonts.HelveticaBold);
+      
+      // Register fontkit for custom font embedding
+      outputPdf.registerFontkit(fontkit);
+      
+      // Load and embed default CrashNumberingSerif font from public directory
+      let defaultFont = helvetica;
+      let defaultFontBold = helveticaBold;
+      try {
+        console.log('Attempting to load CrashNumberingSerif font...');
+        const fontResponse = await fetch('/CrashNumberingSerif.otf');
+        if (!fontResponse.ok) {
+          throw new Error(`HTTP error! status: ${fontResponse.status}`);
+        }
+        const fontBytes = await fontResponse.arrayBuffer();
+        console.log('Font loaded, bytes length:', fontBytes.byteLength);
+        defaultFont = await outputPdf.embedFont(fontBytes);
+        defaultFontBold = defaultFont;
+        console.log('Default font CrashNumberingSerif embedded successfully');
+      } catch (e) {
+        console.error('Failed to embed default font, falling back to Helvetica:', e);
+      }
+      
+      // Embed custom fonts
+      const embeddedFonts: Record<string, any> = {
+        'CrashNumberingSerif': defaultFont,
+      };
+      for (const font of customFonts) {
+         try {
+            const fontBytes = await font.file.arrayBuffer();
+            embeddedFonts[font.name] = await outputPdf.embedFont(fontBytes);
+         } catch (e) {
+            console.error(`Failed to embed font ${font.name}`, e);
+         }
+      }
+
+      // 4. Identify Fields
+      // Keep fields in their original order to match canvas positions
+      const numberFields = fields.filter(f => f.type === 'number');
+      const staticFields = fields.filter(f => f.type !== 'number');
+      
+      // Helper function to draw placeholder for missing images
+      const drawImagePlaceholder = (page: any, position: { x: number, y: number }, field: any, scaleX: number, scaleY: number, pageHeight: number, helvetica: any, isMultiLeaflet: boolean = false) => {
+        let rectX = field.x * scaleX;
+        let rectY = pageHeight - (field.y * scaleY) - ((field.height || 100) * scaleY);
+        let textX = field.x * scaleX + ((field.width || 100) * scaleX) / 2 - 15;
+        let textY = pageHeight - (field.y * scaleY) - ((field.height || 100) * scaleY) / 2;
+        
+        // For multi-leaflet, apply position offset
+        if (isMultiLeaflet) {
+          rectX += position.x;
+          rectY -= position.y;
+          textX += position.x;
+          textY -= position.y;
+        }
+        
+        page.drawRectangle({
+          x: rectX,
+          y: rectY,
+          width: (field.width || 100) * scaleX,
+          height: (field.height || 100) * scaleY,
+          borderColor: rgb(0.8, 0.8, 0.8),
+          borderWidth: 1,
+          color: rgb(0.95, 0.95, 0.95),
+        });
+        
+        page.drawText('[Photo]', {
+          x: textX,
+          y: textY,
+          size: 10 * scaleY,
+          font: helvetica,
+          color: rgb(0.5, 0.5, 0.5),
+        });
+      };
+      
+      const itemsPerPage = numberFields.length;
+      
+      // Calculate layout for multiple leaflets per page
+      const isMultiLeaflet = leafletsPerPage > 1;
+      const a4Width = 595.28;
+      const a4Height = 841.89;
+      const padding = 10; // Padding between leaflets
+      const bindingMargin = 30; // Binding space on left side for A4 book format
+      
+      let leafletWidth = pageWidth;
+      let leafletHeight = pageHeight;
+      let leafletScale = 1;
+      let cols = 1;
+      let rows = 1;
+      let positions: { x: number, y: number }[] = [];
+      
+      if (isMultiLeaflet) {
+        // Force A4 page size for multi-leaflet layout
+        pageWidth = orientation === 'portrait' ? a4Width : a4Height;
+        pageHeight = orientation === 'portrait' ? a4Height : a4Width;
+        
+        // Calculate grid dimensions using rows-based logic
+        if (leafletsPerPage === 2) {
+          cols = 2;
+          rows = 1;
+        } else if (leafletsPerPage === 4) {
+          cols = 2;
+          rows = 2;
+        } else if (leafletsPerPage === 6) {
+          cols = 2;
+          rows = 3;
+        } else {
+          // For custom numbers, calculate optimal grid
+          // Try to create a balanced grid (more columns than rows for better layout)
+          const sqrt = Math.sqrt(leafletsPerPage);
+          cols = Math.ceil(sqrt);
+          rows = Math.ceil(leafletsPerPage / cols);
+          
+          // Ensure we don't exceed reasonable limits
+          cols = Math.min(cols, 5);
+          rows = Math.min(rows, 4);
+        }
+        
+        // Calculate available space per leaflet (accounting for binding margin on left)
+        const availableWidth = (pageWidth - bindingMargin - padding * (cols + 1)) / cols;
+        const availableHeight = (pageHeight - padding * (rows + 1)) / rows;
+        
+        // Calculate scale to fit leaflet into available space
+        const scaleX = availableWidth / leafletWidth;
+        const scaleY = availableHeight / leafletHeight;
+        leafletScale = Math.min(scaleX, scaleY);
+        
+        // Calculate scaled leaflet dimensions
+        const scaledWidth = leafletWidth * leafletScale;
+        const scaledHeight = leafletHeight * leafletScale;
+        
+        // Calculate positions for each leaflet (centered in grid cells)
+        // Numbering goes RIGHT TO LEFT: so we store positions in reverse column order
+        let leafletsGenerated = 0;
+        for (let row = 0; row < rows && leafletsGenerated < leafletsPerPage; row++) {
+          for (let col = cols - 1; col >= 0 && leafletsGenerated < leafletsPerPage; col--) {
+            const x = bindingMargin + padding + col * (scaledWidth + padding) + (availableWidth - scaledWidth) / 2;
+            const y = padding + row * (scaledHeight + padding) + (availableHeight - scaledHeight) / 2;
+            positions.push({ x, y });
+            leafletsGenerated++;
+          }
+        }
+      } else {
+        positions.push({ x: 0, y: 0 });
+      }
+      
+      // 5. Generation Loop
+      let currentNumber = fromNumber;
+      const shouldLoopReceipts = bulkType === 'receipts' && itemsPerPage > 0;
+      const shouldLoopCertificates = bulkType === 'certificates' && csvData.length > 0;
+      let leafletsDrawn = 0;
+      let csvRowIndex = 0;
+      
+      // Helper function to draw a leaflet at a specific position
+      const drawLeaflet = async (page: any, position: { x: number, y: number }, scale: number, leafletIndex: number, dataRowIndex: number) => {
+        // Use exact canvas dimensions from store for accurate coordinate mapping
+        const canvasWidth = canvasDimensions.width;
+        const canvasHeight = canvasDimensions.height;
+        
+        // For single-leaflet (certificates/receipts with 1 per page): scale from canvas to PDF page
+        // For multi-leaflet (receipts with multiple per page): use scaling to fit leaflet into grid cell
+        let scaleX: number, scaleY: number;
+        
+        if (isMultiLeaflet && leafletsPerPage > 1) {
+          // Multi-leaflet: scale down to fit in grid cell
+          scaleX = (leafletWidth / canvasWidth) * scale;
+          scaleY = (leafletHeight / canvasHeight) * scale;
+        } else {
+          // Single-leaflet: scale from canvas to full PDF page
+          scaleX = pageWidth / canvasWidth;
+          scaleY = pageHeight / canvasHeight;
+        }
+        
+        console.log('Coordinate mapping debug:', {
+          isMultiLeaflet,
+          canvasWidth,
+          canvasHeight,
+          pageWidth,
+          pageHeight,
+          scaleX,
+          scaleY,
+          bulkType
+        });
+        
+        // Get current data row for certificates
+        const currentDataRow = shouldLoopCertificates ? csvData[dataRowIndex] : null;
+        
+        // Draw Number Fields
+        // For receipts: each field (P1, P2, P3...) gets a unique sequential number
+        // P1 = currentNumber, P2 = currentNumber + 1, P3 = currentNumber + 2, etc.
+        for (let fieldIndex = 0; fieldIndex < numberFields.length; fieldIndex++) {
+          const field = numberFields[fieldIndex];
+          let text = field.value || '';
+          // For receipts, use the sequential number based on position
+          // For certificates, use sequential numbering 001-100
+          if (shouldLoopReceipts) {
+            // Each point field gets a unique number: P1=currentNumber, P2=currentNumber+1, etc.
+            const baseNumber = String(currentNumber + fieldIndex).padStart(zeroPadding, '0');
+            text = `${numberingPrefix}${numberingSeparator}${numberingYear}${numberingSeparator}${baseNumber}`;
+          } else if (shouldLoopCertificates) {
+            // For certificates, use sequential numbering from fromNumber
+            const baseNumber = String(fromNumber + dataRowIndex).padStart(zeroPadding, '0');
+            text = `${numberingPrefix}${numberingSeparator}${numberingYear}${numberingSeparator}${baseNumber}`;
+          }
+          
+          // Get Font — respect user's font selection from typography tab
+          let font = defaultFont;
+          if (field.fontFamily && embeddedFonts[field.fontFamily]) {
+            font = embeddedFonts[field.fontFamily];
+          } else if (field.fontFamily === 'Helvetica' || field.fontFamily === 'Times New Roman' || field.fontFamily === 'Courier New') {
+            font = field.bold ? helveticaBold : helvetica;
+          } else {
+            // Fallback: use CrashNumberingSerif or defaultFont
+            font = embeddedFonts['CrashNumberingSerif'] || defaultFont;
+          }
+          
+          // Color
+          const hex = field.color.replace('#', '');
+          const r = parseInt(hex.substring(0, 2), 16) / 255;
+          const g = parseInt(hex.substring(2, 4), 16) / 255;
+          const b = parseInt(hex.substring(4, 6), 16) / 255;
+          
+          const textWidth = font.widthOfTextAtSize(text, field.fontSize * scaleX);
+          let x = field.x * scaleX;
+          
+          if (field.align === 'center') {
+            x += (field.width || 0) * scaleX / 2 - textWidth / 2;
+          } else if (field.align === 'right') {
+            x += (field.width || 0) * scaleX - textWidth;
+          }
+          
+          // Calculate Y: PDF Y is from bottom, Canvas Y is from top
+          // PDF draws from baseline, canvas Y is top of text - subtract to move up slightly
+          const baselineOffset = field.fontSize * scaleY * 0.25; // Adjust to match canvas position
+          let y = pageHeight - (field.y * scaleY) - baselineOffset;
+          
+          // For multi-leaflet, apply position offset
+          if (isMultiLeaflet) {
+            x += position.x;
+            y -= position.y;
+          }
+          
+          console.log(`Field ${field.dataKey}: canvas(${field.x}, ${field.y}) -> pdf(${x}, ${y})`);
+          
+          page.drawText(text, {
+            x: x,
+            y: y,
+            size: field.fontSize * scaleX,
+            font: font,
+            color: rgb(r, g, b),
+          });
+        }
+        
+        // Draw Static Fields (Text and Image)
+        for (const field of staticFields) {
+          // For certificates, get value from current CSV row
+          let text = field.value || '';
+          if (shouldLoopCertificates && field.dataKey && currentDataRow) {
+            text = currentDataRow[field.dataKey] || text;
+          } else if (!shouldLoopCertificates && field.dataKey && csvData.length > 0) {
+            // Fallback to first row for non-looping
+            text = csvData[0][field.dataKey] || text;
+          }
+          
+          if (field.type === 'image' && text) {
+            // Try to get image from extracted images
+            const imageKey = text.split(/[\\/]/).pop()?.toLowerCase() || '';
+            const imageData = extractedImages[imageKey] || extractedImages[text.toLowerCase()];
+            
+            console.log('Image field debug:', {
+              fieldId: field.id,
+              fieldX: field.x,
+              fieldY: field.y,
+              fieldWidth: field.width,
+              fieldHeight: field.height,
+              scaleX,
+              scaleY,
+              position,
+              calculatedX: position.x + (field.x * scaleX),
+              calculatedY: pageHeight - position.y - (field.y * scaleY),
+              imageKey,
+              hasImageData: !!imageData
+            });
+            
+            if (imageData) {
+              try {
+                // Embed the image into the PDF
+                const imgType = imageKey.endsWith('.png') ? 'png' : 'jpg';
+                let embeddedImage;
+                
+                if (imgType === 'png') {
+                  embeddedImage = await outputPdf.embedPng(imageData);
+                } else {
+                  embeddedImage = await outputPdf.embedJpg(imageData);
+                }
+                
+                // Calculate dimensions maintaining aspect ratio
+                const imgWidth = (field.width || 100) * scaleX;
+                const imgHeight = (field.height || 120) * scaleY;
+                
+                let imgX = field.x * scaleX;
+                let imgY = pageHeight - (field.y * scaleY) - imgHeight;
+                
+                // For multi-leaflet, apply position offset
+                if (isMultiLeaflet) {
+                  imgX += position.x;
+                  imgY -= position.y;
+                }
+                
+                page.drawImage(embeddedImage, {
+                  x: imgX,
+                  y: imgY,
+                  width: imgWidth,
+                  height: imgHeight,
+                });
+              } catch (imgError) {
+                console.error('Error embedding image:', imgError);
+                // Fallback to placeholder
+                drawImagePlaceholder(page, position, field, scaleX, scaleY, pageHeight, helvetica, isMultiLeaflet);
+              }
+            } else {
+              // Draw placeholder if image not found
+              drawImagePlaceholder(page, position, field, scaleX, scaleY, pageHeight, helvetica, isMultiLeaflet);
+            }
+            
+            continue;
+          }
+          
+          // Get Font — respect user's font selection from typography tab
+          let font = defaultFont;
+          if (field.fontFamily && embeddedFonts[field.fontFamily]) {
+            font = embeddedFonts[field.fontFamily];
+          } else if (field.fontFamily === 'Helvetica' || field.fontFamily === 'Times New Roman' || field.fontFamily === 'Courier New') {
+            font = field.bold ? helveticaBold : helvetica;
+          } else {
+            // Fallback: use CrashNumberingSerif or defaultFont
+            font = embeddedFonts['CrashNumberingSerif'] || defaultFont;
+          }
+          
+          const hex = field.color.replace('#', '');
+          const r = parseInt(hex.substring(0, 2), 16) / 255;
+          const g = parseInt(hex.substring(2, 4), 16) / 255;
+          const b = parseInt(hex.substring(4, 6), 16) / 255;
+          
+          const textWidth = font.widthOfTextAtSize(text, field.fontSize * scaleX);
+          let x = position.x + (field.x * scaleX);
+          
+          if (field.align === 'center') {
+            x += (field.width || 0) * scaleX / 2 - textWidth / 2;
+          } else if (field.align === 'right') {
+            x += (field.width || 0) * scaleX - textWidth;
+          }
+          
+          // Calculate Y: PDF Y is from bottom, Canvas Y is from top
+          // PDF draws from baseline, canvas Y is top of text - subtract to move up slightly
+          const baselineOffset = field.fontSize * scaleY * 0.25;
+          const y = pageHeight - position.y - (field.y * scaleY) - baselineOffset;
+          
+          page.drawText(text, {
+            x: x,
+            y: y,
+            size: field.fontSize * scaleX,
+            font: font,
+            color: rgb(r, g, b),
+          });
+        }
+      };
+      
+      do {
+        // Create a new page (only when starting a new set of leaflets)
+        if (leafletsDrawn % leafletsPerPage === 0) {
+          let page;
+          if (sourcePdf && !isMultiLeaflet) {
+            const [copiedPage] = await outputPdf.copyPages(sourcePdf, [0]);
+            page = outputPdf.addPage(copiedPage);
+          } else {
+            page = outputPdf.addPage([pageWidth, pageHeight]);
+          }
+          
+          // Draw leaflets at calculated positions
+          const startIdx = leafletsDrawn;
+          for (let i = 0; i < leafletsPerPage; i++) {
+            // Check if we should continue
+            if (shouldLoopReceipts && currentNumber > toNumber) break;
+            if (shouldLoopCertificates && csvRowIndex >= csvData.length) break;
+            if (!shouldLoopReceipts && !shouldLoopCertificates && i > 0) break;
+            // Check pagesToGenerate limit
+            if (pagesToGenerate && leafletsDrawn >= pagesToGenerate * leafletsPerPage) break;
+            
+            const positionIndex = i % positions.length;
+            const position = positions[positionIndex];
+            
+            // Draw template image at this position if available
+            if (templateImage) {
+              // For multi-leaflet, apply position offset
+              // For single leaflet, position is (0, 0)
+              const drawX = leafletsPerPage > 1 ? position.x : 0;
+              const drawY = leafletsPerPage > 1 
+                ? pageHeight - position.y - (leafletHeight * leafletScale)
+                : pageHeight - (leafletHeight * leafletScale);
+              
+              page.drawImage(templateImage, {
+                x: drawX,
+                y: drawY,
+                width: leafletWidth * leafletScale,
+                height: leafletHeight * leafletScale,
+              });
+            }
+            
+            await drawLeaflet(page, position, leafletScale, leafletsDrawn, csvRowIndex);
+            
+            if (shouldLoopReceipts) {
+              // Increment by the number of fields per leaflet (e.g., 6 fields = +6)
+              currentNumber += numberFields.length;
+            }
+            if (shouldLoopCertificates) {
+              csvRowIndex++;
+            }
+            
+            leafletsDrawn++;
+          }
+        }
+        
+        // Break if we are done with numbers (receipts)
+        if (shouldLoopReceipts && currentNumber > toNumber) break;
+        // Break if we are done with CSV rows (certificates)
+        if (shouldLoopCertificates && csvRowIndex >= csvData.length) break;
+        // Break if not looping (single page)
+        if (!shouldLoopReceipts && !shouldLoopCertificates) break;
+        // Break if pagesToGenerate limit reached
+        if (pagesToGenerate && leafletsDrawn >= pagesToGenerate * leafletsPerPage) break;
+        
+      } while ((shouldLoopReceipts && currentNumber <= toNumber) || (shouldLoopCertificates && csvRowIndex < csvData.length));
+
+      const pdfBytes = await outputPdf.save();
+      const blob = new Blob([pdfBytes as unknown as ArrayBuffer], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      setGeneratedPdfUrl(url);
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+      alert("Failed to generate PDF. Check console for details.");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  return (
+    <div className="w-full bg-[#1a1a1a] flex flex-col h-full overflow-hidden">
+      <div className="p-4 lg:p-6 space-y-6 lg:space-y-8 overflow-y-auto scrollbar-hide">
+        {/* Template Upload */}
+        <div className="space-y-3 pt-2">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
+              <FileUp className="w-4 h-4 text-blue-400" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-white">Template Upload</h2>
+              <p className="text-xs text-gray-500">Upload your PDF, PNG or JPG template</p>
+            </div>
+          </div>
+          <div 
+            {...getRootProps()} 
+            className={clsx(
+              "border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center text-center cursor-pointer transition-all duration-200",
+              isDragActive 
+                ? "border-blue-500 bg-blue-500/10" 
+                : "border-white/20 hover:border-blue-400/50 hover:bg-white/[0.02]"
+            )}
+          >
+            <input {...getInputProps()} />
+            {templateUrl ? (
+              <div className="space-y-3">
+                <div className="w-12 h-12 mx-auto rounded-xl bg-blue-500/10 flex items-center justify-center">
+                  <FileText className="w-6 h-6 text-blue-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-200 text-center break-all line-clamp-2 max-w-[200px]">
+                    {templateFile?.name || 'Uploaded File'}
+                  </p>
+                  <p className="text-[10px] text-gray-500 uppercase mt-1 tracking-wide">
+                    {templateFile?.name.split('.').pop() || 'FILE'}
+                  </p>
+                </div>
+                <p className="text-xs text-gray-400">Click or drag to replace</p>
+              </div>
+            ) : (
+              <div className="space-y-3 flex flex-col items-center">
+                <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center">
+                  <FileUp className="w-6 h-6 text-blue-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-white">Drop template here or click to browse</p>
+                  <p className="text-xs text-gray-500 mt-1">Supports PDF, PNG, JPG up to 50MB</p>
+                </div>
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="px-2 py-1 rounded bg-white/5 text-[10px] text-gray-400 font-medium">PDF</span>
+                  <span className="px-2 py-1 rounded bg-white/5 text-[10px] text-gray-400 font-medium">PNG</span>
+                  <span className="px-2 py-1 rounded bg-white/5 text-[10px] text-gray-400 font-medium">JPG</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Template Display Options */}
+        {templateUrl && bulkType === 'receipts' && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center">
+                <ImageIcon className="w-4 h-4 text-purple-400" />
+              </div>
+              <div>
+                <h2 className="text-sm font-semibold text-white">Template Display</h2>
+                <p className="text-xs text-gray-500">Configure output appearance</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setTemplateBlackAndWhite(!templateBlackAndWhite)}
+              className={clsx(
+                "w-full flex items-center justify-between py-2.5 px-3 rounded-xl text-sm transition-all duration-200 border",
+                templateBlackAndWhite
+                  ? "bg-purple-500/10 border-purple-500/30 text-purple-300"
+                  : "bg-white/5 border-white/10 text-gray-300 hover:bg-white/[0.07] hover:border-white/20"
+              )}
+            >
+              <span className="flex items-center gap-2">
+                <ImageIcon className="w-4 h-4" />
+                Black & White Mode
+              </span>
+              <span className={clsx(
+                "px-2 py-0.5 rounded text-[10px] font-medium transition-colors",
+                templateBlackAndWhite ? "bg-purple-500/20 text-purple-300" : "bg-white/10 text-gray-400"
+              )}>
+                {templateBlackAndWhite ? 'ON' : 'OFF'}
+              </span>
+            </button>
+          </div>
+        )}
+
+        {/* Page Generation Control */}
+        {templateUrl && bulkType === 'receipts' && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                <Hash className="w-4 h-4 text-emerald-400" />
+              </div>
+              <div>
+                <h2 className="text-sm font-semibold text-white">Pages to Generate</h2>
+                <p className="text-xs text-gray-500">Limit output or generate all</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="number"
+                min="1"
+                placeholder="All pages"
+                value={pagesToGenerate || ''}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 1)) {
+                    setPagesToGenerate(value === '' ? null : parseInt(value));
+                  }
+                }}
+                onBlur={(e) => {
+                  const value = parseInt(e.target.value);
+                  if (isNaN(value) || value < 1) {
+                    setPagesToGenerate(null);
+                  }
+                }}
+                className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm outline-none focus:border-emerald-500/50 focus:bg-white/[0.07] transition-all placeholder:text-gray-600"
+              />
+              <button
+                onClick={() => setPagesToGenerate(null)}
+                className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 rounded-xl text-sm text-gray-400 hover:text-white transition-all font-medium"
+              >
+                All
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Placement Mode */}
+        {templateUrl && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center">
+                <MousePointer2 className="w-4 h-4 text-amber-400" />
+              </div>
+              <div>
+                <h2 className="text-sm font-semibold text-white">Add Elements</h2>
+                <p className="text-xs text-gray-500">Place merge points and photos</p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <button 
+                onClick={() => setInteractionMode(interactionMode === 'place_point' ? 'select' : 'place_point')}
+                className={clsx(
+                  "w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-sm transition-all duration-200 border",
+                  interactionMode === 'place_point' 
+                    ? "bg-amber-500/10 border-amber-500/30 text-amber-300" 
+                    : "bg-white/5 border-white/10 text-gray-300 hover:bg-white/[0.07] hover:border-white/20"
+                )}
+              >
+                <MousePointer2 className="w-4 h-4" /> 
+                {interactionMode === 'place_point' ? 'Click on Canvas to Place Point' : 'Place Merge Point (P1, P2...)'}
+              </button>
+              
+              {(bulkType === 'certificates' || bulkType === 'idcards') && (
+                <button 
+                  onClick={() => handleAddField('image')}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-white/5 hover:bg-white/[0.07] border border-white/10 hover:border-white/20 rounded-xl text-sm text-gray-300 hover:text-white transition-all"
+                >
+                  <ImageIcon className="w-4 h-4" /> Add Photo Field
+                </button>
+              )}
+            </div>
+            <p className="text-xs text-gray-500">
+              Use "Place Merge Point" to define variable data positions for bulk merging.
+            </p>
+          </div>
+        )}
+
+        {/* Enhanced Settings Tabs */}
+        <div className="space-y-4 pt-4 border-t border-white/10">
+          {/* Modern Tab Navigation */}
+          <div className="relative">
+            {/* Tab Background Slider */}
+            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-full" />
+            
+            {/* Tab Container */}
+            <div className="relative flex gap-1 border-b border-white/10 pb-1 overflow-x-auto">
+              {/* Active Tab Indicator */}
+              <div 
+                className="absolute bottom-0 h-0.5 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full transition-all duration-300 ease-out"
+                style={{
+                  width: '80px',
+                  left: activeTab === 'data' ? '0' : 
+                       activeTab === 'typography' ? '84px' : 
+                       activeTab === 'layout' ? '168px' : '0',
+                  opacity: (activeTab === 'data' || activeTab === 'typography' || activeTab === 'layout') ? 1 : 0
+                }}
+              />
+              
+              <TabButton 
+                active={activeTab === 'data'} 
+                onClick={() => {
+                  setIsTabLoading(true);
+                  setTimeout(() => {
+                    setActiveTab('data');
+                    setIsTabLoading(false);
+                  }, 100);
+                }} 
+                icon={<Database className="w-4 h-4" />} 
+                label="Data" 
+              />
+              {(selectedField || activeTab === 'typography') && (
+                <TabButton 
+                  active={activeTab === 'typography'} 
+                  onClick={() => {
+                    setIsTabLoading(true);
+                    setTimeout(() => {
+                      setActiveTab('typography');
+                      setIsTabLoading(false);
+                    }, 100);
+                  }} 
+                  icon={<Type className="w-4 h-4" />} 
+                  label="Typography" 
+                />
+              )}
+              {bulkType === 'receipts' && (
+                <TabButton 
+                  active={activeTab === 'layout'} 
+                  onClick={() => {
+                    setIsTabLoading(true);
+                    setTimeout(() => {
+                      setActiveTab('layout');
+                      setIsTabLoading(false);
+                    }, 100);
+                  }} 
+                  icon={<Layout className="w-4 h-4" />} 
+                  label="Layout" 
+                />
+              )}
+            </div>
+          </div>
+
+          {/* Tab Content with Enhanced Transitions */}
+          <div className="relative min-h-[400px] overflow-hidden">
+            {/* Show skeleton when switching tabs */}
+            {isTabLoading && (
+              <div className="space-y-4">
+                <Skeleton lines={3} />
+                <div className="grid grid-cols-2 gap-2">
+                  <Skeleton />
+                  <Skeleton />
+                </div>
+                <Skeleton lines={2} />
+              </div>
+            )}
+
+            {/* Data Tab Content */}
+            <div className={clsx("transition-opacity duration-200", isTabLoading ? "opacity-0" : "opacity-100")}>
+              {activeTab === 'data' && !isTabLoading && (
+                <div className="space-y-4">
+                  {bulkType === 'receipts' && (
+                    <div className="space-y-3">
+                      <h3 className="text-xs font-semibold text-gray-300 flex items-center gap-2">
+                        <Hash className="w-3 h-3 text-blue-400" /> Numbering
+                      </h3>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[10px] text-gray-500 mb-1">From</label>
+                          <input 
+                            type="number" 
+                            value={isNaN(fromNumber) ? '' : fromNumber} 
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 0)) {
+                                setNumbering(value === '' ? 0 : parseInt(value), toNumber, zeroPadding);
+                              }
+                            }}
+                            onBlur={(e) => {
+                              const value = parseInt(e.target.value);
+                              if (isNaN(value) || value < 0) {
+                                setNumbering(1, toNumber, zeroPadding);
+                              }
+                            }}
+                            className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-gray-500 mb-1">To</label>
+                          <input 
+                            type="number" 
+                            value={isNaN(toNumber) ? '' : toNumber} 
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 0)) {
+                                setNumbering(fromNumber, value === '' ? 0 : parseInt(value), zeroPadding);
+                              }
+                            }}
+                            onBlur={(e) => {
+                              const value = parseInt(e.target.value);
+                              if (isNaN(value) || value < 0) {
+                                setNumbering(fromNumber, 100, zeroPadding);
+                              }
+                            }}
+                            className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-gray-500 mb-1">Padding</label>
+                          <input 
+                            type="number" 
+                            value={isNaN(zeroPadding) ? '' : zeroPadding} 
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 0)) {
+                                setNumbering(fromNumber, toNumber, value === '' ? 0 : parseInt(value));
+                              }
+                            }}
+                            onBlur={(e) => {
+                              const value = parseInt(e.target.value);
+                              if (isNaN(value) || value < 0) {
+                                setNumbering(fromNumber, toNumber, 3);
+                              }
+                            }}
+                            className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Custom Numbering Format */}
+                      <div className="space-y-2 pt-2 border-t border-white/10">
+                        <h4 className="text-[10px] font-medium text-gray-400">Custom Format</h4>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div>
+                            <label className="block text-[10px] text-gray-500 mb-1">Prefix</label>
+                            <input 
+                              type="text" 
+                              value={numberingPrefix} 
+                              onChange={(e) => {
+                                setCustomNumbering(e.target.value, numberingYear, numberingSeparator);
+                              }}
+                              className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-gray-500 mb-1">Year</label>
+                            <input 
+                              type="text" 
+                              value={numberingYear} 
+                              onChange={(e) => {
+                                setCustomNumbering(numberingPrefix, e.target.value, numberingSeparator);
+                              }}
+                              className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-gray-500 mb-1">Separator</label>
+                            <select 
+                              value={numberingSeparator} 
+                              onChange={(e) => {
+                                setCustomNumbering(numberingPrefix, numberingYear, e.target.value);
+                              }}
+                              className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs outline-none"
+                            >
+                              <option value="/">/</option>
+                              <option value="-">-</option>
+                              <option value="_">_</option>
+                              <option value=" ">Space</option>
+                            </select>
+                          </div>
+                        </div>
+                        
+                        {/* Preview */}
+                        <div className="bg-black/30 rounded p-2">
+                          <div className="text-[10px] text-gray-500 mb-1">Preview:</div>
+                          <div className="text-xs text-blue-400 font-mono">
+                            {numberingPrefix}{numberingSeparator}{numberingYear}{numberingSeparator}{String(fromNumber).padStart(zeroPadding, '0')}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {(bulkType === 'certificates' || bulkType === 'idcards') && (
+                    <div className="space-y-3">
+                      <h3 className="text-xs font-semibold text-gray-300 flex items-center gap-2">
+                        <Database className="w-3 h-3 text-blue-400" /> CSV Data
+                      </h3>
+                      
+                      {csvData.length === 0 ? (
+                        <div>
+                          <label className="block text-[10px] text-gray-500 mb-2">
+                            Upload CSV or ZIP with columns: name, title, photo
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="file"
+                              accept=".csv,.zip,text/csv,application/zip"
+                              onChange={handleDataUpload}
+                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                            />
+                            <div className="flex items-center justify-center gap-2 py-3 px-4 bg-white/5 hover:bg-white/10 border border-white/10 border-dashed rounded-lg text-sm transition-colors">
+                              <Upload className="w-4 h-4 text-gray-400" />
+                              <span className="text-gray-300">Click to upload CSV or ZIP</span>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-emerald-400">✓ {csvData.length} records loaded</span>
+                            <button 
+                              onClick={() => { setCsvData([], []); setExtractedImages({}); }}
+                              className="text-xs text-red-400 hover:text-red-300"
+                            >
+                              Clear
+                            </button>
+                          </div>
+                          
+                          {/* Field Mapping */}
+                          <div className="space-y-2 pt-2 border-t border-white/10">
+                            <h4 className="text-[10px] font-medium text-gray-400">Field Mapping</h4>
+                            {fields.filter(f => f.type === 'text' || f.type === 'image').map(field => (
+                              <div key={field.id} className="flex items-center justify-between text-xs">
+                                <span className="text-gray-300">{field.label}</span>
+                                <span className="text-emerald-400 text-[10px]">→ {field.dataKey}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Typography Tab Content */}
+            <div className={clsx("transition-opacity duration-200", isTabLoading ? "opacity-0" : "opacity-100")}>
+              {activeTab === 'typography' && !isTabLoading && (
+                <div className="space-y-4">
+                  {selectedField ? (
+                    <>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-semibold text-gray-300 flex items-center gap-2">
+                      <Type className="w-3 h-3 text-blue-400" /> Typography
+                    </h3>
+                    <button
+                      onClick={() => removeField(selectedField.id)}
+                      className="p-1.5 bg-red-500/10 border border-red-500/50 text-red-400 hover:bg-red-500/20 hover:text-red-300 rounded-lg transition-colors"
+                      title="Remove Field"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+
+                  {/* Quick Actions */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        // Ensure typography tab stays active and field remains selected
+                        if (activeTab !== 'typography') setActiveTab('typography');
+                        if (selectedField) {
+                          updateField(selectedField.id, { fontSize: selectedField.fontSize + 1 });
+                          // Re-select field to ensure it stays selected
+                          setSelectedFieldId(selectedField.id);
+                        }
+                      }}
+                      className="flex items-center justify-center gap-2 py-2 px-3 bg-white/5 hover:bg-white/10 rounded-lg text-xs transition-all"
+                    >
+                      <Plus className="w-3 h-3" />
+                      Increase Size
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        // Ensure typography tab stays active and field remains selected
+                        if (activeTab !== 'typography') setActiveTab('typography');
+                        if (selectedField) {
+                          updateField(selectedField.id, { fontSize: Math.max(1, selectedField.fontSize - 1) });
+                          // Re-select field to ensure it stays selected
+                          setSelectedFieldId(selectedField.id);
+                        }
+                      }}
+                      className="flex items-center justify-center gap-2 py-2 px-3 bg-white/5 hover:bg-white/10 rounded-lg text-xs transition-all"
+                    >
+                      <Minus className="w-3 h-3" />
+                      Decrease Size
+                    </button>
+                  </div>
+
+                  {/* Font Settings */}
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-[10px] text-gray-500 mb-1.5 font-medium">Font Family</label>
+                      <select 
+                        value={selectedField.fontFamily} 
+                        onChange={(e) => {
+                          updateField(selectedField.id, { fontFamily: e.target.value });
+                          setSelectedFieldId(selectedField.id);
+                        }}
+                        onFocus={() => {
+                          if (activeTab !== 'typography') setActiveTab('typography');
+                        }}
+                        className="w-full bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-blue-500/50 transition-colors"
+                      >
+                        <option value="CrashNumberingSerif">CrashNumberingSerif</option>
+                        <option value="Helvetica">Helvetica</option>
+                        <option value="Times New Roman">Times New Roman</option>
+                        <option value="Courier New">Courier New</option>
+                        {customFonts.map(font => (
+                          <option key={font.name} value={font.name}>{font.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="col-span-2">
+                        <label className="block text-[10px] text-gray-500 mb-1.5 font-medium">Size</label>
+                        <input 
+                          type="number" 
+                          value={isNaN(selectedField.fontSize) ? '' : selectedField.fontSize}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 0)) {
+                              updateField(selectedField.id, { fontSize: value === '' ? 0 : parseInt(value) });
+                              setSelectedFieldId(selectedField.id);
+                            }
+                          }}
+                          onFocus={() => {
+                            if (activeTab !== 'typography') setActiveTab('typography');
+                          }}
+                          onBlur={(e) => {
+                            const value = parseInt(e.target.value);
+                            if (isNaN(value) || value < 0) {
+                              updateField(selectedField.id, { fontSize: 12 });
+                            }
+                            setSelectedFieldId(selectedField.id);
+                          }}
+                          className="w-full bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-blue-500/50 transition-colors"
+                          placeholder="12"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-gray-500 mb-1.5 font-medium">Color</label>
+                        <div className="relative">
+                          <input 
+                            type="color" 
+                            value={selectedField.color} 
+                            onChange={(e) => {
+                              updateField(selectedField.id, { color: e.target.value });
+                              setSelectedFieldId(selectedField.id);
+                            }}
+                            onFocus={() => {
+                              if (activeTab !== 'typography') setActiveTab('typography');
+                            }}
+                            className="w-full h-9 bg-black/50 border border-white/10 rounded-lg cursor-pointer outline-none focus:border-blue-500/50 transition-colors"
+                          />
+                          <div 
+                            className="absolute inset-0 rounded-lg pointer-events-none"
+                            style={{ backgroundColor: selectedField.color, opacity: 0.2 }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Text Alignment */}
+                  <div className="space-y-2">
+                    <label className="block text-[10px] text-gray-500 mb-1.5 font-medium">Alignment</label>
+                    <div className="grid grid-cols-3 gap-1">
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          // Ensure typography tab stays active and field remains selected
+                          if (activeTab !== 'typography') setActiveTab('typography');
+                          if (selectedField) {
+                            updateField(selectedField.id, { align: 'left' });
+                            setSelectedFieldId(selectedField.id);
+                          }
+                        }}
+                        className={clsx(
+                          "py-2 flex items-center justify-center rounded-lg text-xs font-medium transition-all border",
+                          selectedField.align === 'left' 
+                            ? "bg-blue-600 border-blue-500 text-white" 
+                            : "bg-black/50 border-white/10 text-gray-400 hover:bg-white/5 hover:text-white"
+                        )}
+                      >
+                        <AlignLeft className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          // Ensure typography tab stays active and field remains selected
+                          if (activeTab !== 'typography') setActiveTab('typography');
+                          if (selectedField) {
+                            updateField(selectedField.id, { align: 'center' });
+                            setSelectedFieldId(selectedField.id);
+                          }
+                        }}
+                        className={clsx(
+                          "py-2 flex items-center justify-center rounded-lg text-xs font-medium transition-all border",
+                          selectedField.align === 'center' 
+                            ? "bg-blue-600 border-blue-500 text-white" 
+                            : "bg-black/50 border-white/10 text-gray-400 hover:bg-white/5 hover:text-white"
+                        )}
+                      >
+                        <AlignCenter className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          // Ensure typography tab stays active and field remains selected
+                          if (activeTab !== 'typography') setActiveTab('typography');
+                          if (selectedField) {
+                            updateField(selectedField.id, { align: 'right' });
+                            setSelectedFieldId(selectedField.id);
+                          }
+                        }}
+                        className={clsx(
+                          "py-2 flex items-center justify-center rounded-lg text-xs font-medium transition-all border",
+                          selectedField.align === 'right' 
+                            ? "bg-blue-600 border-blue-500 text-white" 
+                            : "bg-black/50 border-white/10 text-gray-400 hover:bg-white/5 hover:text-white"
+                        )}
+                      >
+                        <AlignRight className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Text Style */}
+                  <div className="space-y-2">
+                    <label className="block text-[10px] text-gray-500 mb-1.5 font-medium">Style</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          // Ensure typography tab stays active and field remains selected
+                          if (activeTab !== 'typography') setActiveTab('typography');
+                          if (selectedField) {
+                            updateField(selectedField.id, { bold: !selectedField.bold });
+                            setSelectedFieldId(selectedField.id);
+                          }
+                        }}
+                        className={clsx(
+                          "py-2 flex items-center justify-center rounded-lg text-xs font-medium transition-all border",
+                          selectedField.bold 
+                            ? "bg-blue-600 border-blue-500 text-white" 
+                            : "bg-black/50 border-white/10 text-gray-400 hover:bg-white/5 hover:text-white"
+                        )}
+                      >
+                        <Bold className="w-3 h-3 inline mr-2" />
+                        {selectedField.bold ? 'Bold' : 'Regular'}
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          // Ensure typography tab stays active and field remains selected
+                          if (activeTab !== 'typography') setActiveTab('typography');
+                          if (selectedField) {
+                            updateField(selectedField.id, { 
+                              fontFamily: 'CrashNumberingSerif',
+                              fontSize: 16,
+                              color: '#000000',
+                              bold: false,
+                              align: 'left'
+                            });
+                            setSelectedFieldId(selectedField.id);
+                          }
+                        }}
+                        className="py-2 px-3 bg-gray-600 hover:bg-gray-500 rounded-lg text-xs text-white transition-colors"
+                      >
+                        Reset to Default
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Field Info */}
+                  <div className="bg-black/30 rounded-lg p-3 space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-gray-400">Type</span>
+                      <span className="text-gray-200 capitalize">{selectedField.type}</span>
+                    </div>
+                    {selectedField.dataKey && (
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-gray-400">Data Key</span>
+                        <span className="text-gray-200">{selectedField.dataKey}</span>
+                      </div>
+                    )}
+                    {selectedField.label && (
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-gray-400">Label</span>
+                        <span className="text-gray-200">{selectedField.label}</span>
+                      </div>
+                    )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-center py-8">
+                    <Type className="w-8 h-8 text-gray-500 mx-auto mb-3" />
+                    <p className="text-sm text-gray-400">No field selected</p>
+                    <p className="text-xs text-gray-500 mt-1">Select a field on the canvas to edit its typography</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {activeTab === 'layout' && (
+            <div className={clsx("transition-opacity duration-200", isTabLoading ? "opacity-0" : "opacity-100")}>
+              {activeTab === 'layout' && !isTabLoading && (
+                <div className="space-y-4">
+                  <h3 className="text-xs font-semibold text-gray-300 flex items-center gap-2">
+                    <Layout className="w-3 h-3 text-blue-400" /> Layout
+                  </h3>
+                  
+                  {/* Leaflets Per Page */}
+                  <div className="space-y-2">
+                    <label className="block text-[10px] text-gray-500">Leaflets Per Page (A4)</label>
+                    <div className="grid grid-cols-4 gap-2">
+                      {[1, 2, 4, 6].map((num) => (
+                        <button
+                          key={num}
+                          onClick={() => setLayout(num, columns, rows, orientation)}
+                          className={clsx(
+                            "py-2 px-1 rounded-xl text-xs font-semibold transition-all duration-300",
+                            leafletsPerPage === num
+                              ? "bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-500/25 border border-blue-400/30"
+                              : "glass-card text-gray-400 hover:text-gray-200"
+                          )}
+                        >
+                          {num}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        min="1"
+                        max="20"
+                        placeholder="Custom"
+                        value={![1, 2, 4, 6].includes(leafletsPerPage) ? leafletsPerPage : ''}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (value === '' || (!isNaN(parseInt(value)) && parseInt(value) >= 1 && parseInt(value) <= 20)) {
+                            setLayout(value === '' ? 1 : parseInt(value), columns, rows, orientation);
+                          }
+                        }}
+                        onBlur={(e) => {
+                          const value = parseInt(e.target.value);
+                          if (isNaN(value) || value < 1 || value > 20) {
+                            setLayout(1, columns, rows, orientation);
+                          }
+                        }}
+                        className="flex-1 glass-card rounded-xl px-3 py-2 text-xs outline-none focus:border-blue-500/50 focus:bg-white/[0.05] transition-all placeholder:text-gray-600"
+                      />
+                      <button
+                        onClick={() => setLayout(1, columns, rows, orientation)}
+                        className="px-3 py-2 glass-card rounded-xl text-xs text-gray-400 hover:text-white transition-all font-medium"
+                      >
+                        Reset
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-gray-500">
+                      {leafletsPerPage === 1 && "Single leaflet per A4 page"}
+                      {leafletsPerPage === 2 && "2 leaflets in 2x1 grid"}
+                      {leafletsPerPage === 4 && "4 leaflets in 2x2 grid"}
+                      {leafletsPerPage === 6 && "6 leaflets in 2x3 grid"}
+                      {![1, 2, 4, 6].includes(leafletsPerPage) && `${leafletsPerPage} custom leaflets per page`}
+                    </p>
+                  </div>
+                  
+                  {/* Orientation */}
+                  <div className="space-y-2">
+                    <label className="block text-[10px] text-gray-500">Orientation</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => setLayout(leafletsPerPage, columns, rows, 'portrait')}
+                        className={clsx(
+                          "flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-semibold transition-all duration-300",
+                          orientation === 'portrait'
+                            ? "bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-500/25 border border-blue-400/30"
+                            : "glass-card text-gray-400 hover:text-gray-200"
+                        )}
+                      >
+                        <div className="w-3 h-4 border-2 border-current rounded-sm opacity-80" /> Portrait
+                      </button>
+                      <button
+                        onClick={() => setLayout(leafletsPerPage, columns, rows, 'landscape')}
+                        className={clsx(
+                          "flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-semibold transition-all duration-300",
+                          orientation === 'landscape'
+                            ? "bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-500/25 border border-blue-400/30"
+                            : "glass-card text-gray-400 hover:text-gray-200"
+                        )}
+                      >
+                        <div className="w-4 h-3 border-2 border-current rounded-sm opacity-80" /> Landscape
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {/* Info */}
+                  <div className="glass-card bg-blue-500/5 border-blue-500/20 rounded-xl p-3 relative overflow-hidden group">
+                    <div className="absolute inset-0 bg-gradient-to-r from-blue-500/10 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
+                    <p className="text-[10px] text-blue-200/80 leading-relaxed relative z-10">
+                      <span className="font-semibold text-blue-400">Auto Layout:</span> Leaflets are automatically scaled and positioned with padding for clean printing.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+        {/* Generate Button */}
+        <button 
+          onClick={handleGenerate}
+          disabled={isGenerating || !templateUrl}
+          className={clsx(
+            "w-full font-semibold py-3.5 rounded-xl transition-all duration-200 flex items-center justify-center gap-2.5 text-sm relative overflow-hidden",
+            isGenerating 
+              ? "bg-gradient-to-r from-blue-600 to-purple-600 cursor-not-allowed" 
+              : "bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-blue-500/20 hover:shadow-blue-500/30 hover:scale-[1.02] active:scale-[0.98]"
+          )}
+        >
+          {/* Animated background overlay when generating */}
+          {isGenerating && (
+            <div className="absolute inset-0 bg-gradient-to-r from-blue-600/20 to-purple-600/20 animate-pulse" />
+          )}
+          
+          {isGenerating ? (
+            <>
+              <LoadingSpinner size="sm" className="text-white" />
+              <span className="relative z-10">Generating PDF...</span>
+            </>
+          ) : (
+            <>
+              <Zap className="w-4 h-4 relative z-10" />
+              <span className="relative z-10">Generate PDF</span>
+            </>
+          )}
+        </button>
+
+      </div>
+    </div>
+  );
+}
