@@ -1,0 +1,301 @@
+import { create } from 'zustand';
+import { temporal } from 'zundo';
+
+export type BulkType = 'receipts' | 'certificates' | 'idcards';
+
+export interface FieldConfig {
+  id: string;
+  type: 'text' | 'number' | 'image';
+  label: string;
+  x: number;  // Absolute X (for backward compatibility)
+  y: number;  // Absolute Y (for backward compatibility)
+  rx?: number; // Relative X (0-1, fraction of cell width)
+  ry?: number; // Relative Y (0-1, fraction of cell height)
+  width?: number;
+  height?: number;
+  fontSize: number;
+  fontFamily: string;
+  color: string;
+  bold: boolean;
+  align: 'left' | 'center' | 'right';
+  value?: string; // For static text or default value
+  dataKey?: string; // Key from CSV
+}
+
+export interface AppState {
+  bulkType: BulkType;
+  setBulkType: (type: BulkType) => void;
+
+  templateUrl: string | null;
+  templateFile: File | null;
+  setTemplate: (file: File | null, url: string | null) => void;
+
+  fields: FieldConfig[];
+  addField: (field: FieldConfig) => void;
+  updateField: (id: string, updates: Partial<FieldConfig>) => void;
+  removeField: (id: string) => void;
+  setFields: (fields: FieldConfig[]) => void;
+
+  selectedFieldId: string | null;
+  setSelectedFieldId: (id: string | null) => void;
+  selectedFieldIds: string[];
+  toggleFieldSelection: (id: string, isCtrlKey: boolean) => void;
+  clearFieldSelection: () => void;
+  updateMultipleFields: (ids: string[], updates: Partial<FieldConfig>) => void;
+  selectAllNumberFields: () => void;
+
+  // Numbering (Receipts)
+  fromNumber: number;
+  toNumber: number;
+  zeroPadding: number;
+  setNumbering: (from: number, to: number, padding: number) => void;
+
+  // Custom Numbering Format
+  numberingPrefix: string;
+  numberingYear: string;
+  numberingSeparator: string;
+  setCustomNumbering: (prefix: string, year: string, separator: string) => void;
+
+  // CSV Data
+  csvData: any[];
+  csvHeaders: string[];
+  setCsvData: (data: any[], headers: string[]) => void;
+  
+  // Extracted Images from ZIP
+  extractedImages: Record<string, ArrayBuffer>;
+  setExtractedImages: (images: Record<string, ArrayBuffer>) => void;
+
+  // Canvas Dimensions (for accurate PDF coordinate mapping)
+  canvasDimensions: { width: number; height: number };
+  setCanvasDimensions: (dimensions: { width: number; height: number }) => void;
+
+  // Layout Controls
+  leafletsPerPage: number;
+  columns: number;
+  rows: number;
+  orientation: 'portrait' | 'landscape';
+  setLayout: (leaflets: number, columns: number, rows: number, orientation: 'portrait' | 'landscape') => void;
+
+  // Preview State
+  currentPage: number;
+  setCurrentPage: (page: number) => void;
+
+  // Loading States
+  isLoading: boolean;
+  setIsLoading: (loading: boolean) => void;
+  loadingMessage: string;
+  setLoadingMessage: (message: string) => void;
+  uploadProgress: number;
+  setUploadProgress: (progress: number) => void;
+
+  // Interaction Mode
+  interactionMode: 'select' | 'place_point';
+  setInteractionMode: (mode: 'select' | 'place_point') => void;
+  pointCounter: number;
+  setPointCounter: (count: number) => void;
+
+  // Custom Fonts
+  customFonts: { name: string; url: string; file: File }[];
+  addCustomFont: (font: { name: string; url: string; file: File }) => void;
+
+  // Output
+  generatedPdfUrl: string | null;
+  setGeneratedPdfUrl: (url: string | null) => void;
+  
+  // Template Display
+  templateBlackAndWhite: boolean;
+  setTemplateBlackAndWhite: (enabled: boolean) => void;
+
+  // Page Generation Control
+  pagesToGenerate: number | null;
+  setPagesToGenerate: (pages: number | null) => void;
+
+  // Modern Field Placement Controls
+  snapToGrid: boolean;
+  setSnapToGrid: (enabled: boolean) => void;
+  gridSize: number;
+  setGridSize: (size: number) => void;
+  zoomLevel: number;
+  setZoomLevel: (zoom: number) => void;
+  showCoordinates: boolean;
+  setShowCoordinates: (enabled: boolean) => void;
+  showGrid: boolean;
+  setShowGrid: (enabled: boolean) => void;
+
+  // Migration
+  onMount: () => void;
+}
+
+export const useStore = create<AppState>()(
+  temporal(
+    (set) => ({
+      bulkType: 'receipts',
+      setBulkType: (type) => set({ bulkType: type, fields: [] }),
+
+      templateUrl: null,
+      templateFile: null,
+      setTemplate: (file, url) => set({ templateFile: file, templateUrl: url }),
+
+      fields: [],
+      addField: (field) => set((state) => ({ fields: [...state.fields, field] })),
+      updateField: (id, updates) => set((state) => ({
+        fields: state.fields.map((f) => (f.id === id ? { ...f, ...updates } : f)),
+      })),
+      removeField: (id) => set((state) => ({
+        fields: state.fields.filter((f) => f.id !== id),
+        selectedFieldId: state.selectedFieldId === id ? null : state.selectedFieldId,
+      })),
+      setFields: (fields) => set({ fields }),
+
+      selectedFieldId: null,
+      setSelectedFieldId: (id) => set({ selectedFieldId: id, selectedFieldIds: id ? [id] : [] }),
+      selectedFieldIds: [],
+      toggleFieldSelection: (id, isCtrlKey) => set((state) => {
+        const isSelected = state.selectedFieldIds.includes(id);
+        if (isCtrlKey) {
+          // Toggle selection with Ctrl key
+          if (isSelected) {
+            return { selectedFieldIds: state.selectedFieldIds.filter(fid => fid !== id) };
+          } else {
+            return { selectedFieldIds: [...state.selectedFieldIds, id] };
+          }
+        } else {
+          // Single select without Ctrl
+          return { selectedFieldId: id, selectedFieldIds: [id] };
+        }
+      }),
+      clearFieldSelection: () => set({ selectedFieldId: null, selectedFieldIds: [] }),
+      updateMultipleFields: (ids, updates) => set((state) => ({
+        fields: state.fields.map((f) => (ids.includes(f.id) ? { ...f, ...updates } : f)),
+      })),
+      selectAllNumberFields: () => set((state) => {
+        const numberFieldIds = state.fields.filter(f => f.type === 'number').map(f => f.id);
+        return { 
+          selectedFieldIds: numberFieldIds,
+          selectedFieldId: numberFieldIds.length > 0 ? numberFieldIds[0] : null
+        };
+      }),
+
+      fromNumber: 1,
+      toNumber: 100,
+      zeroPadding: 4,
+      setNumbering: (from, to, padding) => set({ fromNumber: from, toNumber: to, zeroPadding: padding }),
+
+      // Custom Numbering Format
+      numberingPrefix: '',
+      numberingYear: '',
+      numberingSeparator: '',
+      setCustomNumbering: (prefix, year, separator) => set({ numberingPrefix: prefix, numberingYear: year, numberingSeparator: separator }),
+
+      csvData: [],
+      csvHeaders: [],
+      setCsvData: (data, headers) => set({ csvData: data, csvHeaders: headers }),
+      
+      // Extracted Images from ZIP
+      extractedImages: {},
+      setExtractedImages: (images) => set({ extractedImages: images }),
+      
+      // Canvas Dimensions
+      canvasDimensions: { width: 595, height: 842 },
+      setCanvasDimensions: (dimensions) => set({ canvasDimensions: dimensions }),
+
+      leafletsPerPage: 1,
+      columns: 1,
+      rows: 1,
+      orientation: 'portrait',
+      setLayout: (leaflets, columns, rows, orientation) => set({ leafletsPerPage: leaflets, columns, rows, orientation }),
+
+      currentPage: 1,
+      setCurrentPage: (page) => set({ currentPage: page }),
+
+      // Loading States
+      isLoading: false,
+      setIsLoading: (loading) => set({ isLoading: loading }),
+      loadingMessage: '',
+      setLoadingMessage: (message) => set({ loadingMessage: message }),
+      uploadProgress: 0,
+      setUploadProgress: (progress) => set({ uploadProgress: progress }),
+
+      interactionMode: 'select',
+      setInteractionMode: (mode) => set({ interactionMode: mode }),
+      pointCounter: 1,
+      setPointCounter: (count) => set({ pointCounter: count }),
+
+      customFonts: [],
+      addCustomFont: (font) => set((state) => ({ customFonts: [...state.customFonts, font] })),
+      
+      generatedPdfUrl: null,
+      setGeneratedPdfUrl: (url) => set({ generatedPdfUrl: url }),
+      
+      templateBlackAndWhite: false,
+      setTemplateBlackAndWhite: (enabled) => set({ templateBlackAndWhite: enabled }),
+      
+      pagesToGenerate: null,
+      setPagesToGenerate: (pages) => set({ pagesToGenerate: pages }),
+
+      snapToGrid: false,
+      setSnapToGrid: (enabled) => set({ snapToGrid: enabled }),
+      gridSize: 10,
+      setGridSize: (size) => set({ gridSize: size }),
+      zoomLevel: 1,
+      setZoomLevel: (zoom) => set({ zoomLevel: Math.max(0.5, Math.min(3, zoom)) }),
+      showCoordinates: true,
+      setShowCoordinates: (enabled) => set({ showCoordinates: enabled }),
+      showGrid: false,
+      setShowGrid: (enabled) => set({ showGrid: enabled }),
+
+      onMount: () => {
+        const state = useStore.getState();
+        const updatedFields = state.fields.map((field, index) => {
+          if (field.type === 'number' && field.value && field.value.match(/^\d+$/)) {
+            // Convert numeric values like "0001" to "P1", "0002" to "P2", etc.
+            const num = parseInt(field.value);
+            if (!isNaN(num)) {
+              return {
+                ...field,
+                value: `P${index + 1}`,
+                dataKey: `P${index + 1}`,
+                label: `P${index + 1}`
+              };
+            }
+          }
+          return field;
+        });
+        useStore.setState({ fields: updatedFields });
+      },
+    }),
+    {
+      limit: 100, // Limit history to 100 steps
+      partialize: (state) => {
+        const { 
+          fields, 
+          fromNumber, 
+          toNumber, 
+          zeroPadding, 
+          leafletsPerPage, 
+          columns, 
+          rows, 
+          orientation, 
+          numberingPrefix, 
+          numberingYear, 
+          numberingSeparator,
+          selectedFieldIds
+        } = state;
+        return { 
+          fields, 
+          fromNumber, 
+          toNumber, 
+          zeroPadding, 
+          leafletsPerPage, 
+          columns, 
+          rows, 
+          orientation, 
+          numberingPrefix, 
+          numberingYear, 
+          numberingSeparator,
+          selectedFieldIds
+        };
+      },
+    }
+  )
+);
