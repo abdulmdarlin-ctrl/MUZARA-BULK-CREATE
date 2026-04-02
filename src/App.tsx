@@ -1380,6 +1380,17 @@ export default function App() {
       
       let currentNumber = fromNumber;
       let csvRowIndex = 0;
+      
+      console.log('PDF Generation Debug:', {
+        shouldLoopReceipts,
+        shouldLoopCertificates,
+        isMultiLeaflet,
+        itemsPerPage,
+        leafletsPerPage,
+        fromNumber,
+        toNumber,
+        numberFieldsCount: numberFields.length
+      });
 
       for (let pageNum = 0; pageNum < maxPages; pageNum++) {
         // Check if we should stop before creating a new page
@@ -1493,12 +1504,20 @@ export default function App() {
               }
             }
             
+            console.log(`Leaflet ${i}: currentNumber before = ${currentNumber}, numberFields.length = ${numberFields.length}`);
+            
             if (shouldLoopCertificates) {
               csvRowIndex++;
-            } else if (shouldLoopReceipts) {
+              console.log(`  Incremented csvRowIndex to ${csvRowIndex}`);
+            }
+            
+            if (shouldLoopReceipts) {
               // Increment currentNumber by the number of fields per leaflet
               currentNumber += numberFields.length;
+              console.log(`  Incremented currentNumber to ${currentNumber}`);
             }
+            
+            console.log(`Leaflet ${i}: currentNumber after = ${currentNumber}`);
           }
           
         } else {
