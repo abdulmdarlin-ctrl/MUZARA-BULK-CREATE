@@ -1431,9 +1431,9 @@ export default function App() {
               const fieldX = (field.rx ?? field.x / A4_WIDTH) * A4_WIDTH;
               const fieldY = (field.ry ?? field.y / A4_HEIGHT) * A4_HEIGHT;
               
-              // Use same continuous numbering as preview (field index based)
+              // Use continuous numbering: currentNumber increases for each leaflet
               const fieldIndex = numberFields.findIndex(f => f.id === field.id);
-              const actualNumber = fromNumber + fieldIndex;
+              const actualNumber = currentNumber + fieldIndex;
               
               if (actualNumber > toNumber) continue;
               
@@ -1493,7 +1493,12 @@ export default function App() {
               }
             }
             
-            if (shouldLoopCertificates) csvRowIndex++;
+            if (shouldLoopCertificates) {
+              csvRowIndex++;
+            } else if (shouldLoopReceipts) {
+              // Increment currentNumber by the number of fields per leaflet
+              currentNumber += numberFields.length;
+            }
           }
           
         } else {
@@ -1517,9 +1522,9 @@ export default function App() {
             const fieldX = (field.rx ?? field.x / A4_WIDTH) * A4_WIDTH;
             const fieldY = (field.ry ?? field.y / A4_HEIGHT) * A4_HEIGHT;
             
-            // Use same continuous numbering as preview (field index based)
+            // Use continuous numbering: currentNumber increases for each page
             const fieldIndex = numberFields.findIndex(f => f.id === field.id);
-            const actualNumber = fromNumber + fieldIndex;
+            const actualNumber = currentNumber + fieldIndex;
             
             if (shouldLoopReceipts && actualNumber > toNumber) break;
             
@@ -1544,6 +1549,11 @@ export default function App() {
               font: font,
               color: rgb(r, g, b),
             });
+          }
+
+          // Increment currentNumber for receipts after drawing all fields on this page
+          if (shouldLoopReceipts) {
+            currentNumber += numberFields.length;
           }
 
           // Draw static fields
