@@ -366,7 +366,7 @@ export function LeftPanel() {
   const handleGenerate = async () => {
     setIsGenerating(true);
     try {
-      // Helper function to convert image to grayscale with maximum quality preservation
+      // Helper function to convert image to grayscale
       const convertToGrayscale = async (imageBytes: ArrayBuffer, mimeType: string): Promise<Uint8Array> => {
         return new Promise((resolve, reject) => {
           const img = new Image();
@@ -375,52 +375,28 @@ export function LeftPanel() {
           
           img.onload = () => {
             const canvas = document.createElement('canvas');
-            // Use original dimensions for maximum quality
             canvas.width = img.width;
             canvas.height = img.height;
-            const ctx = canvas.getContext('2d', { 
-              willReadFrequently: true,
-              alpha: true 
-            })!;
+            const ctx = canvas.getContext('2d')!;
             
-            // Draw image at full quality
-            ctx.imageSmoothingEnabled = false; // Preserve sharp edges
+            // Draw image
             ctx.drawImage(img, 0, 0);
             
-            // Get image data and convert to grayscale with high-precision luminance
+            // Get image data and convert to grayscale
             const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             const data = imageData.data;
             
-            // Use BT.709 luminance coefficients for professional grayscale
-            // Red: 0.2126, Green: 0.7152, Blue: 0.0722
             for (let i = 0; i < data.length; i += 4) {
-              const r = data[i];
-              const g = data[i + 1];
-              const b = data[i + 2];
-              
-              // BT.709 luminance formula (broadcast standard)
-              let gray = r * 0.2126 + g * 0.7152 + b * 0.0722;
-              
-              // Enhance contrast for better black & white printing
-              // S-curve enhancement
-              gray = gray / 255;
-              gray = gray < 0.5 
-                ? 2 * gray * gray 
-                : 1 - 2 * (1 - gray) * (1 - gray);
-              gray = gray * 255;
-              
-              // Clamp to valid range
-              gray = Math.max(0, Math.min(255, gray));
-              
+              const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
               data[i] = gray;     // Red
               data[i + 1] = gray; // Green
               data[i + 2] = gray; // Blue
-              // Alpha remains unchanged
+              // Alpha (data[i + 3]) remains unchanged
             }
             
             ctx.putImageData(imageData, 0, 0);
             
-            // Convert to PNG for lossless quality - no compression artifacts
+            // Convert to blob with compression for JPEGs
             canvas.toBlob((blob) => {
               if (blob) {
                 const reader = new FileReader();
@@ -432,7 +408,7 @@ export function LeftPanel() {
               } else {
                 reject(new Error('Failed to create blob'));
               }
-            }, 'image/png'); // PNG is lossless - maximum quality
+            }, mimeType, mimeType === 'image/jpeg' ? 0.85 : undefined);
             
             URL.revokeObjectURL(url);
           };
@@ -453,19 +429,22 @@ export function LeftPanel() {
       let templateImage: any = null;
       let sourcePdf: PDFDocument | null = null;
       
-      // Force A4 dimensions (595x842) for consistent coordinate system
-      const A4_WIDTH = 595;
-      const A4_HEIGHT = 842;
-      let pageWidth = A4_WIDTH;
-      let pageHeight = A4_HEIGHT;
+      // Default A4 dimensions
+      let pageWidth = 595.28;
+      let pageHeight = 841.89;
 
       if (templateFile) {
         const fileBytes = await templateFile.arrayBuffer();
         
         if (templateFile.type === 'application/pdf') {
            sourcePdf = await PDFDocument.load(fileBytes);
-           // Keep A4 dimensions - don't use source PDF dimensions
-           // Just use the PDF as a template image source
+           const firstPage = sourcePdf.getPages()[0];
+           const { width, height } = firstPage.getSize();
+           pageWidth = width;
+           pageHeight = height;
+           
+           // Convert PDF to image for drawing on pages
+           // We'll use the PDF.js library to render it to a canvas first
            try {
              const pdfjsLib = await import('pdfjs-dist');
              pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
@@ -474,13 +453,11 @@ export function LeftPanel() {
              const pdfDocument = await loadingTask.promise;
              const pdfPage = await pdfDocument.getPage(1);
              
-             // Render at A4 size with high quality (scale 3x for crisp output)
-             const scale = 3; // Higher resolution for crisp black & white printing
-             const viewport = pdfPage.getViewport({ scale: A4_WIDTH / pdfPage.getViewport({ scale: 1 }).width * scale });
+             const viewport = pdfPage.getViewport({ scale: 2.0 });
              const canvas = document.createElement('canvas');
              canvas.width = viewport.width;
              canvas.height = viewport.height;
-             const context = canvas.getContext('2d', { willReadFrequently: true })!;
+             const context = canvas.getContext('2d')!;
              
              await pdfPage.render({ 
               canvasContext: context, 
@@ -488,9 +465,9 @@ export function LeftPanel() {
               canvas: canvas as any
             }).promise;
              
-             // Convert canvas to PNG bytes at maximum quality
-             const pngUrl = canvas.toDataURL('image/png');
-             let imageBytes = Uint8Array.from(atob(pngUrl.split(',')[1]), c => c.charCodeAt(0));
+             // Convert canvas to JPEG bytes (much smaller and faster than PNG)
+             const jpegData = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+             let imageBytes = Uint8Array.from(atob(jpegData), c => c.charCodeAt(0));
              
              // Apply grayscale if enabled for receipts
              if (templateBlackAndWhite && bulkType === 'receipts') {
@@ -504,7 +481,9 @@ export function LeftPanel() {
              
              templateImage = await outputPdf.embedJpg(imageBytes);
              
-             // Keep A4 dimensions - template is scaled to fit
+             // Update dimensions to match the rendered image
+             pageWidth = viewport.width / 2; // Original size (not scaled)
+             pageHeight = viewport.height / 2;
            } catch (e) {
              console.error('Failed to convert PDF to image:', e);
            }
@@ -530,7 +509,9 @@ export function LeftPanel() {
            } else {
              templateImage = await outputPdf.embedPng(imageBytes);
            }
-           // Keep A4 page dimensions - image will be scaled to fit A4 during drawing
+           // Use image dimensions for the page to ensure accurate mapping
+           pageWidth = templateImage.width;
+           pageHeight = templateImage.height;
         }
       }
 
@@ -620,8 +601,8 @@ export function LeftPanel() {
       const padding = 10; // Padding between leaflets
       const bindingMargin = 30; // Binding space on left side for A4 book format
       
-      let leafletWidth = A4_WIDTH;
-      let leafletHeight = A4_HEIGHT;
+      let leafletWidth = pageWidth;
+      let leafletHeight = pageHeight;
       let leafletScale = 1;
       let cols = 1;
       let rows = 1;

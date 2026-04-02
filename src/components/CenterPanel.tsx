@@ -64,8 +64,8 @@ export function CenterPanel() {
     if (!canvasRef.current) return;
 
     const c = new fabric.Canvas(canvasRef.current, {
-      width: 595, // A4 width in points
-      height: 842, // A4 height in points
+      width: 500, // Initial width, will be updated based on template
+      height: 700, // Initial height
       backgroundColor: '#ffffff',
       preserveObjectStacking: true,
     });
@@ -283,41 +283,27 @@ export function CenterPanel() {
                   img.applyFilters();
                 }
 
-                // Force A4 dimensions (595x842) for consistent coordinate system across all components
-                const width = 595;
-                const height = 842;
-
-                // Calculate scale to fit image within A4 dimensions while maintaining aspect ratio
-                const imgRatio = (img.width || 1) / (img.height || 1);
-                const a4Ratio = width / height;
-                
-                let drawWidth = width;
-                let drawHeight = height;
-                let scale = 1;
-                
-                if (imgRatio > a4Ratio) {
-                  // Image is wider than A4 - fit to width
-                  scale = width / (img.width || width);
-                  drawHeight = (img.height || height) * scale;
+                // If it wasn't a PDF (so it was a direct image upload), calculate dimensions now
+                let width = 500;
+                let height = 700;
+                if (templateFile.type !== 'application/pdf') {
+                   const ratio = (img.width || 1) / (img.height || 1);
+                   width = 500;
+                   height = 500 / ratio;
                 } else {
-                  // Image is taller than A4 - fit to height
-                  scale = height / (img.height || height);
-                  drawWidth = (img.width || width) * scale;
+                   // For PDF, we already set the canvasEl dimensions based on viewport
+                   height = (img.height || 0) * (500 / (img.width || 500));
                 }
+
+                const scale = width / (img.width || width);
                 
-                // Center the image on the canvas
-                const offsetX = (width - drawWidth) / 2;
-                const offsetY = (height - drawHeight) / 2;
-                
-                // Keep canvas at A4 dimensions
+                // Resize canvas to fit image
                 canvas.setDimensions({ width: width, height: height });
                 setCanvasDimensions({ width, height });
                 
                 img.set({
                   scaleX: scale,
                   scaleY: scale,
-                  left: offsetX,
-                  top: offsetY,
                   originX: 'left',
                   originY: 'top',
                   selectable: false,
@@ -340,9 +326,9 @@ export function CenterPanel() {
           setError(err.message || "Failed to load template. Please try another file.");
         }
       } else {
-         // Default dimensions if no template - use A4
-         canvas.setDimensions({ width: 595, height: 842 });
-         setCanvasDimensions({ width: 595, height: 842 });
+         // Default dimensions if no template
+         canvas.setDimensions({ width: 500, height: 700 });
+         setCanvasDimensions({ width: 500, height: 700 });
       }
 
       fields.forEach((field) => {

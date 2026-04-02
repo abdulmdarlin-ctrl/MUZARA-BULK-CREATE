@@ -66,7 +66,7 @@ function TemplateCanvas({
   toggleFieldSelection: (id: string, isCtrlKey: boolean) => void;
   interactionMode: 'select' | 'place_point';
   setInteractionMode: (mode: 'select' | 'place_point') => void;
-  onAddField: (type: 'text' | 'number' | 'image', position?: { x: number; y: number; rx?: number; ry?: number }) => void;
+  onAddField: (type: 'text' | 'number' | 'image', position?: { x: number; y: number }) => void;
   updateField: (id: string, updates: Partial<FieldConfig>) => void;
   updateMultipleFields: (ids: string[], updates: Partial<FieldConfig>) => void;
   removeField: (id: string) => void;
@@ -1021,7 +1021,7 @@ function TemplateCanvas({
   );
 }
 
-// Helper function to convert image to grayscale with maximum quality
+// Helper function to convert image to grayscale
 function convertToGrayscale(imageBytes: Uint8Array, mimeType: string): Promise<Uint8Array<ArrayBuffer>> {
   return new Promise((resolve, reject) => {
     const blob = new Blob([imageBytes.buffer as ArrayBuffer], { type: mimeType });
@@ -1032,10 +1032,7 @@ function convertToGrayscale(imageBytes: Uint8Array, mimeType: string): Promise<U
       const canvas = document.createElement('canvas');
       canvas.width = img.width;
       canvas.height = img.height;
-      const ctx = canvas.getContext('2d', { 
-        willReadFrequently: true,
-        alpha: true 
-      });
+      const ctx = canvas.getContext('2d');
       
       if (!ctx) {
         URL.revokeObjectURL(url);
@@ -1043,44 +1040,11 @@ function convertToGrayscale(imageBytes: Uint8Array, mimeType: string): Promise<U
         return;
       }
       
-      // Draw image at full quality
-      ctx.imageSmoothingEnabled = false; // Preserve sharp edges
+      // Draw image with grayscale filter
+      ctx.filter = 'grayscale(100%) contrast(1.2)';
       ctx.drawImage(img, 0, 0);
       
-      // Get image data and convert to grayscale with high-precision luminance
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imageData.data;
-      
-      // Use BT.709 luminance coefficients for professional grayscale
-      // Red: 0.2126, Green: 0.7152, Blue: 0.0722
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-        
-        // BT.709 luminance formula (broadcast standard)
-        let gray = r * 0.2126 + g * 0.7152 + b * 0.0722;
-        
-        // Enhance contrast for better black & white printing
-        // S-curve enhancement
-        gray = gray / 255;
-        gray = gray < 0.5 
-          ? 2 * gray * gray 
-          : 1 - 2 * (1 - gray) * (1 - gray);
-        gray = gray * 255;
-        
-        // Clamp to valid range
-        gray = Math.max(0, Math.min(255, gray));
-        
-        data[i] = gray;     // Red
-        data[i + 1] = gray; // Green
-        data[i + 2] = gray; // Blue
-        // Alpha remains unchanged
-      }
-      
-      ctx.putImageData(imageData, 0, 0);
-      
-      // Convert to PNG for lossless quality
+      // Convert back to bytes
       canvas.toBlob((blob) => {
         URL.revokeObjectURL(url);
         if (blob) {
@@ -1092,7 +1056,7 @@ function convertToGrayscale(imageBytes: Uint8Array, mimeType: string): Promise<U
         } else {
           reject(new Error('Failed to convert image'));
         }
-      }, 'image/png'); // PNG is lossless - maximum quality
+      }, mimeType);
     };
     
     img.onerror = () => {
@@ -1307,42 +1271,30 @@ export default function App() {
             const pdf = await loadingTask.promise;
             const page = await pdf.getPage(1);
             
-            // Render to canvas at higher scale for quality
+            // Render to canvas at scale=1 to preserve original dimensions
             const canvas = document.createElement('canvas');
-            const scale = 3; // Higher resolution for crisp black & white printing
-            const viewport = page.getViewport({ scale });
+            const viewport = page.getViewport({ scale: 1 });
             canvas.width = viewport.width;
             canvas.height = viewport.height;
-            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+            const ctx = canvas.getContext('2d');
             
             if (ctx) {
               const renderContext: any = { canvasContext: ctx, viewport };
               await page.render(renderContext).promise;
               
-              // Apply grayscale conversion with enhanced contrast
-              const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-              const data = imageData.data;
+              // Apply grayscale filter
+              ctx.filter = 'grayscale(100%) contrast(1.2)';
+              ctx.globalCompositeOperation = 'copy';
+              ctx.drawImage(canvas, 0, 0);
               
-              for (let i = 0; i < data.length; i += 4) {
-                // Use luminance formula for better grayscale perception
-                const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-                // Apply slight contrast boost for better black & white appearance
-                const enhanced = Math.min(255, Math.max(0, gray * 1.1));
-                data[i] = enhanced;     // Red
-                data[i + 1] = enhanced; // Green
-                data[i + 2] = enhanced; // Blue
-              }
-              
-              ctx.putImageData(imageData, 0, 0);
-              
-              // Convert canvas to PNG bytes for lossless quality
+              // Convert canvas to PNG bytes
               const pngUrl = canvas.toDataURL('image/png');
               const pngBytes = Uint8Array.from(atob(pngUrl.split(',')[1]), c => c.charCodeAt(0));
               
               // Embed as PNG image instead of using PDF source
               templateImage = await outputPdf.embedPng(pngBytes);
-              pageWidth = templateImage.width / scale;
-              pageHeight = templateImage.height / scale;
+              pageWidth = templateImage.width;
+              pageHeight = templateImage.height;
               sourcePdf = null; // Clear sourcePdf so we use image path
             }
           } catch (err) {
@@ -1479,10 +1431,9 @@ export default function App() {
               const fieldX = (field.rx ?? field.x / A4_WIDTH) * A4_WIDTH;
               const fieldY = (field.ry ?? field.y / A4_HEIGHT) * A4_HEIGHT;
               
-              // Use continuous numbering: account for page and leaflet position
+              // Use same continuous numbering as preview (field index based)
               const fieldIndex = numberFields.findIndex(f => f.id === field.id);
-              const leafletStartNumber = currentNumber + (i * numberFields.length);
-              const actualNumber = leafletStartNumber + fieldIndex;
+              const actualNumber = fromNumber + fieldIndex;
               
               if (actualNumber > toNumber) continue;
               
@@ -1542,12 +1493,7 @@ export default function App() {
               }
             }
             
-            if (shouldLoopCertificates) {
-              csvRowIndex++;
-            } else if (shouldLoopReceipts) {
-              // Increment currentNumber by the number of fields drawn on this leaflet
-              currentNumber += numberFields.length;
-            }
+            if (shouldLoopCertificates) csvRowIndex++;
           }
           
         } else {
@@ -1571,9 +1517,9 @@ export default function App() {
             const fieldX = (field.rx ?? field.x / A4_WIDTH) * A4_WIDTH;
             const fieldY = (field.ry ?? field.y / A4_HEIGHT) * A4_HEIGHT;
             
-            // Use continuous numbering based on currentNumber
+            // Use same continuous numbering as preview (field index based)
             const fieldIndex = numberFields.findIndex(f => f.id === field.id);
-            const actualNumber = currentNumber + fieldIndex;
+            const actualNumber = fromNumber + fieldIndex;
             
             if (shouldLoopReceipts && actualNumber > toNumber) break;
             
@@ -1598,11 +1544,6 @@ export default function App() {
               font: font,
               color: rgb(r, g, b),
             });
-          }
-          
-          // Increment currentNumber for receipts after drawing all fields on this page
-          if (shouldLoopReceipts) {
-            currentNumber += numberFields.length;
           }
 
           // Draw static fields

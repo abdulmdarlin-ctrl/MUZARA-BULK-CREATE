@@ -196,7 +196,7 @@ export const useStore = create<AppState>()(
       setExtractedImages: (images) => set({ extractedImages: images }),
       
       // Canvas Dimensions
-      canvasDimensions: { width: 595, height: 842 },
+      canvasDimensions: { width: 500, height: 700 },
       setCanvasDimensions: (dimensions) => set({ canvasDimensions: dimensions }),
 
       leafletsPerPage: 1,
