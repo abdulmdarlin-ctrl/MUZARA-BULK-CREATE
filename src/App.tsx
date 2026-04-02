@@ -1021,7 +1021,7 @@ function TemplateCanvas({
   );
 }
 
-// Helper function to convert image to grayscale
+// Helper function to convert image to high-quality grayscale
 function convertToGrayscale(imageBytes: Uint8Array, mimeType: string): Promise<Uint8Array<ArrayBuffer>> {
   return new Promise((resolve, reject) => {
     const blob = new Blob([imageBytes.buffer as ArrayBuffer], { type: mimeType });
@@ -1030,9 +1030,11 @@ function convertToGrayscale(imageBytes: Uint8Array, mimeType: string): Promise<U
     
     img.onload = () => {
       const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d');
+      // Render at higher resolution for better quality
+      const scale = 2;
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
       
       if (!ctx) {
         URL.revokeObjectURL(url);
@@ -1040,12 +1042,56 @@ function convertToGrayscale(imageBytes: Uint8Array, mimeType: string): Promise<U
         return;
       }
       
-      // Draw image with grayscale filter
-      ctx.filter = 'grayscale(100%) contrast(1.2)';
+      // Draw image at higher resolution
+      ctx.scale(scale, scale);
       ctx.drawImage(img, 0, 0);
       
-      // Convert back to bytes
-      canvas.toBlob((blob) => {
+      // Get image data for pixel-level manipulation
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+      
+      // Apply high-quality grayscale conversion
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        
+        // BT.709 luminance coefficients for perceptually accurate grayscale
+        let gray = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        
+        // S-curve contrast enhancement for modern look
+        // Normalize to 0-1, apply curve, then denormalize
+        const normalized = gray / 255;
+        // Smooth S-curve: enhances midtones while preserving shadows/highlights
+        const contrasted = normalized < 0.5 
+          ? 2 * normalized * normalized 
+          : 1 - 2 * (1 - normalized) * (1 - normalized);
+        // Apply subtle contrast boost
+        const boost = 0.15;
+        const finalNormalized = normalized + (contrasted - normalized) * boost;
+        gray = Math.max(0, Math.min(255, finalNormalized * 255));
+        
+        // Set all channels to grayscale value
+        data[i] = gray;
+        data[i + 1] = gray;
+        data[i + 2] = gray;
+        // Alpha channel (data[i + 3]) remains unchanged
+      }
+      
+      // Put processed data back
+      ctx.putImageData(imageData, 0, 0);
+      
+      // Scale back down for anti-aliasing
+      const finalCanvas = document.createElement('canvas');
+      finalCanvas.width = img.width;
+      finalCanvas.height = img.height;
+      const finalCtx = finalCanvas.getContext('2d');
+      if (finalCtx) {
+        finalCtx.drawImage(canvas, 0, 0, img.width, img.height);
+      }
+      
+      // Convert to PNG for lossless quality
+      finalCanvas.toBlob((blob) => {
         URL.revokeObjectURL(url);
         if (blob) {
           const reader = new FileReader();
@@ -1056,7 +1102,7 @@ function convertToGrayscale(imageBytes: Uint8Array, mimeType: string): Promise<U
         } else {
           reject(new Error('Failed to convert image'));
         }
-      }, mimeType);
+      }, 'image/png');
     };
     
     img.onerror = () => {
@@ -1282,10 +1328,33 @@ export default function App() {
               const renderContext: any = { canvasContext: ctx, viewport };
               await page.render(renderContext).promise;
               
-              // Apply grayscale filter
-              ctx.filter = 'grayscale(100%) contrast(1.2)';
-              ctx.globalCompositeOperation = 'copy';
-              ctx.drawImage(canvas, 0, 0);
+              // Apply high-quality grayscale conversion using pixel manipulation
+              const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              const data = imageData.data;
+              
+              for (let i = 0; i < data.length; i += 4) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+                
+                // BT.709 luminance coefficients for perceptually accurate grayscale
+                let gray = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                
+                // S-curve contrast enhancement for modern look
+                const normalized = gray / 255;
+                const contrasted = normalized < 0.5 
+                  ? 2 * normalized * normalized 
+                  : 1 - 2 * (1 - normalized) * (1 - normalized);
+                const boost = 0.15;
+                const finalNormalized = normalized + (contrasted - normalized) * boost;
+                gray = Math.max(0, Math.min(255, finalNormalized * 255));
+                
+                data[i] = gray;
+                data[i + 1] = gray;
+                data[i + 2] = gray;
+              }
+              
+              ctx.putImageData(imageData, 0, 0);
               
               // Convert canvas to PNG bytes
               const pngUrl = canvas.toDataURL('image/png');
