@@ -66,7 +66,7 @@ function TemplateCanvas({
   toggleFieldSelection: (id: string, isCtrlKey: boolean) => void;
   interactionMode: 'select' | 'place_point';
   setInteractionMode: (mode: 'select' | 'place_point') => void;
-  onAddField: (type: 'text' | 'number' | 'image', position?: { x: number; y: number }) => void;
+  onAddField: (type: 'text' | 'number' | 'image', position?: { x: number; y: number; rx?: number; ry?: number }) => void;
   updateField: (id: string, updates: Partial<FieldConfig>) => void;
   updateMultipleFields: (ids: string[], updates: Partial<FieldConfig>) => void;
   removeField: (id: string) => void;
