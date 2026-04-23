@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { temporal } from 'zundo';
 
-export type BulkType = 'receipts' | 'certificates' | 'idcards';
+export type BulkType = 'receipts' | 'certificates';
 
 export interface FieldConfig {
   id: string;
@@ -74,7 +74,9 @@ export interface AppState {
   columns: number;
   rows: number;
   orientation: 'portrait' | 'landscape';
+  bindingMargin: number;
   setLayout: (leaflets: number, columns: number, rows: number, orientation: 'portrait' | 'landscape') => void;
+  setBindingMargin: (margin: number) => void;
 
   // Preview State
   currentPage: number;
@@ -203,7 +205,9 @@ export const useStore = create<AppState>()(
       columns: 1,
       rows: 1,
       orientation: 'portrait',
+      bindingMargin: 0,
       setLayout: (leaflets, columns, rows, orientation) => set({ leafletsPerPage: leaflets, columns, rows, orientation }),
+      setBindingMargin: (margin) => set({ bindingMargin: margin }),
 
       currentPage: 1,
       setCurrentPage: (page) => set({ currentPage: page }),

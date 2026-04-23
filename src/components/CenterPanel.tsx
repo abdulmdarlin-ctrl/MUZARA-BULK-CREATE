@@ -425,7 +425,7 @@ export function CenterPanel() {
       canvas.backgroundColor = '#ffffff';
       
       // Clear the underlying HTML5 canvas context directly
-      const context = canvas.getContext('2d');
+      const context = canvas.getElement().getContext('2d');
       if (context) {
         context.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
       }

@@ -5,10 +5,11 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { 
-  FileUp, FileText, Download, Printer, Plus, Hash, Image as ImageIcon, 
-  MousePointer2, Upload, Database, Layout, Type, Trash2, Minus,
-  AlignLeft, AlignCenter, AlignRight, Bold, ArrowLeft, Sparkles, Undo, Redo
+import {
+  FileUp, FileText, Download, Printer, Hash, Image as ImageIcon,
+  MousePointer2, Upload, Database, Layout, Type, Trash2,
+  AlignLeft, AlignCenter, AlignRight, Bold, ArrowLeft, Undo, Redo,
+  Receipt, GraduationCap, ChevronRight, CheckCircle2
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { useStore, FieldConfig } from './store';
@@ -24,19 +25,15 @@ function cn(...inputs: ClassValue[]) {
 }
 
 // Canvas component for template preview with field placement
-function TemplateCanvas({ 
-  templateUrl, 
+function TemplateCanvas({
+  templateUrl,
   templateFile,
-  fields, 
-  selectedFieldId, 
-  setSelectedFieldId,
+  fields,
   selectedFieldIds,
   toggleFieldSelection,
   interactionMode,
-  setInteractionMode,
   onAddField,
   updateField,
-  updateMultipleFields,
   removeField,
   templateBlackAndWhite,
   fromNumber,
@@ -48,27 +45,23 @@ function TemplateCanvas({
   columns,
   rows,
   orientation,
+  bindingMargin,
   bulkType,
   snapToGrid,
   gridSize,
   zoomLevel,
   setZoomLevel,
-  showCoordinates,
   showGrid,
-  canvasDimensions,
+  isSpacePanning,
 }: {
   templateUrl: string | null;
   templateFile: File | null;
   fields: FieldConfig[];
-  selectedFieldId: string | null;
-  setSelectedFieldId: (id: string | null) => void;
   selectedFieldIds: string[];
   toggleFieldSelection: (id: string, isCtrlKey: boolean) => void;
   interactionMode: 'select' | 'place_point';
-  setInteractionMode: (mode: 'select' | 'place_point') => void;
   onAddField: (type: 'text' | 'number' | 'image', position?: { x: number; y: number; rx?: number; ry?: number }) => void;
   updateField: (id: string, updates: Partial<FieldConfig>) => void;
-  updateMultipleFields: (ids: string[], updates: Partial<FieldConfig>) => void;
   removeField: (id: string) => void;
   templateBlackAndWhite: boolean;
   fromNumber: number;
@@ -80,23 +73,22 @@ function TemplateCanvas({
   columns: number;
   rows: number;
   orientation: 'portrait' | 'landscape';
-  bulkType: 'receipts' | 'certificates' | 'idcards';
+  bindingMargin: number;
+  bulkType: 'receipts' | 'certificates';
   snapToGrid: boolean;
   gridSize: number;
   zoomLevel: number;
   setZoomLevel: (zoom: number) => void;
-  showCoordinates: boolean;
   showGrid: boolean;
-  canvasDimensions: { width: number; height: number };
+  isSpacePanning: boolean;
 }) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const pdfCanvasRef = useRef<HTMLCanvasElement>(null);
   const [isDragging, setIsDragging] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-  const [imgSize, setImgSize] = useState({ width: 595, height: 842 });
-  const [pdfPage, setPdfPage] = useState<any>(null);
-  
+  const [pdfDataUrl, setPdfDataUrl] = useState<string | null>(null);
+  const [pdfSize, setPdfSize] = useState<{ width: number; height: number } | null>(null);
+
   // Modern placement features state
   const [hoveredField, setHoveredField] = useState<string | null>(null);
   const [selectionBox, setSelectionBox] = useState<{ start: { x: number; y: number }; end: { x: number; y: number } } | null>(null);
@@ -105,56 +97,41 @@ function TemplateCanvas({
   const [nudgeDirection, setNudgeDirection] = useState<{ x: number; y: number } | null>(null);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
 
-  const pdfRenderTaskRef = useRef<any>(null);
-  const isRenderingRef = useRef<boolean>(false);
+  const { csvData, currentPage } = useStore();
 
-  // Load PDF if template is PDF
+
+  // Load PDF — render to data URL (used by both single and multi-leaflet views)
   useEffect(() => {
-    if (templateUrl && templateFile?.type === 'application/pdf') {
-      const loadPdf = async () => {
-        if (isRenderingRef.current && pdfRenderTaskRef.current) {
-          try {
-            pdfRenderTaskRef.current.cancel();
-            await new Promise(resolve => setTimeout(resolve, 50));
-          } catch (e) {}
-        }
-        if (isRenderingRef.current) return;
-        isRenderingRef.current = true;
-        try {
-          const loadingTask = pdfjsLib.getDocument(templateUrl);
-          const pdf = await loadingTask.promise;
-          const page = await pdf.getPage(1);
-          setPdfPage(page);
-          // Force A4 dimensions for consistent coordinate system
-          setImgSize({ width: 595, height: 842 });
-          if (pdfCanvasRef.current) {
-            const canvas = pdfCanvasRef.current;
-            const context = canvas.getContext('2d');
-            const renderViewport = page.getViewport({ scale: 1 });
-            canvas.width = renderViewport.width;
-            canvas.height = renderViewport.height;
-            if (context) {
-              const renderContext: any = { canvasContext: context, viewport: renderViewport };
-              pdfRenderTaskRef.current = page.render(renderContext);
-              await pdfRenderTaskRef.current.promise;
-            }
+    if (!templateUrl || templateFile?.type !== 'application/pdf') return;
+    let cancelled = false;
+    setPdfDataUrl(null);
+    setPdfSize(null);
+    (async () => {
+      try {
+        const pdf = await pdfjsLib.getDocument(templateUrl).promise;
+        const page = await pdf.getPage(1);
+        if (cancelled) return;
+
+        // Render at 2× into an offscreen canvas → data URL shared by all cells
+        const offscreen = document.createElement('canvas');
+        const ctx = offscreen.getContext('2d');
+        const vp = page.getViewport({ scale: 2 });
+        const vp1 = page.getViewport({ scale: 1 });
+        offscreen.width = vp.width;
+        offscreen.height = vp.height;
+        if (ctx) {
+          await (page.render({ canvasContext: ctx, viewport: vp } as any).promise);
+          if (!cancelled) {
+            setPdfDataUrl(offscreen.toDataURL('image/png'));
+            setPdfSize({ width: vp1.width, height: vp1.height });
           }
-        } catch (err) {
-          if ((err as any)?.name !== 'RenderingCancelled') {
-            console.error("Error loading PDF for canvas:", err);
-          }
-        } finally {
-          pdfRenderTaskRef.current = null;
-          isRenderingRef.current = false;
         }
-      };
-      loadPdf();
-    }
-    return () => {
-      if (pdfRenderTaskRef.current) {
-        try { pdfRenderTaskRef.current.cancel(); } catch (e) {}
+
+      } catch (err: any) {
+        if (err?.name !== 'RenderingCancelledException') console.error('PDF load error:', err);
       }
-    };
+    })();
+    return () => { cancelled = true; };
   }, [templateUrl, templateFile]);
 
   // Keyboard nudging with arrow keys
@@ -233,6 +210,7 @@ function TemplateCanvas({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedFieldIds, fields, snapToGrid, gridSize, zoomLevel, updateField, setZoomLevel]);
 
+
   // Helper to snap coordinates to grid
   const snapToGridCoord = (value: number) => {
     if (!snapToGrid) return value;
@@ -259,31 +237,37 @@ function TemplateCanvas({
     return { x: guideX, y: guideY };
   };
 
+  // Get the template image/canvas element for the leaflet cell under the mouse event
+  const getRefElement = (e: React.MouseEvent | MouseEvent): HTMLElement | null => {
+    // In multi-leaflet mode, find the specific cell being clicked
+    const cell = (e.target as HTMLElement).closest('[data-leaflet-cell]') as HTMLElement | null;
+    if (cell) {
+      return cell.querySelector('img, canvas') as HTMLElement | null;
+    }
+    return canvasRef.current?.querySelector('img, canvas') as HTMLElement | null;
+  };
+
   const handleCanvasClick = (e: React.MouseEvent) => {
     if (interactionMode !== 'place_point' || isSelecting) return;
     e.stopPropagation();
-    
-    const imgElement = canvasRef.current?.querySelector('img, canvas') as HTMLElement | null;
+
+    const imgElement = getRefElement(e);
     const rect = imgElement?.getBoundingClientRect();
     if (!rect) return;
     
-    // Calculate position in A4 space (595x842)
-    const A4_WIDTH = 595;
-    const A4_HEIGHT = 842;
-    const scaleX = A4_WIDTH / rect.width;
-    const scaleY = A4_HEIGHT / rect.height;
-    let x = (e.clientX - rect.left) * scaleX;
-    let y = (e.clientY - rect.top) * scaleY;
-    
-    // Apply grid snapping in A4 space
-    x = snapToGridCoord(x);
-    y = snapToGridCoord(y);
-    
-    // Store as relative coordinates (0-1 fraction of cell)
-    const rx = x / A4_WIDTH;
-    const ry = y / A4_HEIGHT;
-    
-    // Pass both absolute (for backward compat) and relative
+    // Compute rx/ry as pure fractions (0–1) of the cell the user clicked in.
+    // rect is the bounding box of the cell's img — its size is CELL_W*zoom × CELL_H*zoom.
+    let rx = (e.clientX - rect.left) / rect.width;
+    let ry = (e.clientY - rect.top)  / rect.height;
+    rx = Math.max(0, Math.min(1, rx));
+    ry = Math.max(0, Math.min(1, ry));
+
+    // Absolute coords in canonical 595×842 space (used by single-view canvas & backward compat)
+    const x = snapToGridCoord(rx * 595);
+    const y = snapToGridCoord(ry * 842);
+    rx = x / 595;
+    ry = y / 842;
+
     onAddField('number', { x, y, rx, ry });
   };
 
@@ -316,18 +300,14 @@ function TemplateCanvas({
       setIsDragging(fieldId);
     }
     
-    const imgElement = canvasRef.current?.querySelector('img, canvas') as HTMLElement | null;
+    const imgElement = getRefElement(e);
     const rect = imgElement?.getBoundingClientRect();
     const field = fields.find(f => f.id === fieldId);
     if (rect && field && !isCtrlKey) {
-      // Use A4 dimensions for drag offset calculation
-      const A4_WIDTH = 595;
-      const A4_HEIGHT = 842;
-      const scaleX = A4_WIDTH / rect.width;
-      const scaleY = A4_HEIGHT / rect.height;
+      // Convert mouse position to 595×842 canonical space, then subtract field position
       setDragOffset({
-        x: (e.clientX - rect.left) * scaleX - field.x,
-        y: (e.clientY - rect.top) * scaleY - field.y
+        x: ((e.clientX - rect.left) / rect.width) * 595 - field.x,
+        y: ((e.clientY - rect.top)  / rect.height) * 842 - field.y,
       });
     }
   };
@@ -335,21 +315,13 @@ function TemplateCanvas({
   const handleMouseMove = (e: React.MouseEvent) => {
     // Track mouse position for placement reticle - use same calculation as placement
     if (interactionMode === 'place_point' && canvasRef.current) {
-      const imgElement = canvasRef.current?.querySelector('img, canvas') as HTMLElement | null;
+      const imgElement = getRefElement(e);
       const rect = imgElement?.getBoundingClientRect() || canvasRef.current.getBoundingClientRect();
-      
-      // Calculate position using A4 dimensions
-      const A4_WIDTH = 595;
-      const A4_HEIGHT = 842;
-      const scaleX = A4_WIDTH / rect.width;
-      const scaleY = A4_HEIGHT / rect.height;
-      const templateX = (e.clientX - rect.left) * scaleX;
-      const templateY = (e.clientY - rect.top) * scaleY;
-      
-      // Convert back to screen coordinates for the reticle
+      // Reticle position in screen-px relative to the canvasRef container
+      const containerRect = canvasRef.current.getBoundingClientRect();
       setMousePos({
-        x: templateX * zoomLevel,
-        y: templateY * zoomLevel
+        x: e.clientX - containerRect.left,
+        y: e.clientY - containerRect.top,
       });
     }
     
@@ -366,42 +338,32 @@ function TemplateCanvas({
     
     // Handle field dragging
     if (!isDragging || !canvasRef.current) return;
-    
-    const imgElement = canvasRef.current?.querySelector('img, canvas') as HTMLElement | null;
+
+    const imgElement = getRefElement(e);
     const rect = imgElement?.getBoundingClientRect();
     if (!rect) return;
-    
-    // Use A4 dimensions for dragging
-    const A4_WIDTH = 595;
-    const A4_HEIGHT = 842;
-    const scaleX = A4_WIDTH / rect.width;
-    const scaleY = A4_HEIGHT / rect.height;
-    let x = (e.clientX - rect.left) * scaleX - dragOffset.x;
-    let y = (e.clientY - rect.top) * scaleY - dragOffset.y;
-    
-    // Calculate smart guides
+
+    // Map mouse to canonical 595×842 space, subtract stored drag offset
+    let x = ((e.clientX - rect.left) / rect.width) * 595 - dragOffset.x;
+    let y = ((e.clientY - rect.top)  / rect.height) * 842 - dragOffset.y;
+
+    // Smart guides + snapping
     const guides = calculateSmartGuides(x, y, isDragging);
     setSmartGuides(guides);
-    
-    // Snap to smart guides if close enough
     if (guides.x !== null && Math.abs(x - guides.x) < 5) x = guides.x;
     if (guides.y !== null && Math.abs(y - guides.y) < 5) y = guides.y;
-    
-    // Apply grid snapping
     x = snapToGridCoord(x);
     y = snapToGridCoord(y);
-    
-    // Calculate relative coordinates
-    const rx = x / A4_WIDTH;
-    const ry = y / A4_HEIGHT;
-    
-    updateField(isDragging, { x, y, rx, ry });
+
+    updateField(isDragging, { x, y, rx: x / 595, ry: y / 842 });
   };
 
   const handleMouseUp = () => {
     // Complete selection box
     if (isSelecting && selectionBox) {
-      const imgElement = canvasRef.current?.querySelector('img, canvas') as HTMLElement | null;
+      // For selection box, use first cell's image as reference
+      const firstCell = canvasRef.current?.querySelector('[data-leaflet-cell]') as HTMLElement | null;
+      const imgElement = (firstCell ?? canvasRef.current)?.querySelector('img, canvas') as HTMLElement | null;
       const rect = imgElement?.getBoundingClientRect();
       if (rect) {
         // Use A4 dimensions for selection
@@ -447,22 +409,17 @@ function TemplateCanvas({
     loadFont();
   }, []);
 
-  useEffect(() => {
-    if (templateUrl && templateFile?.type.startsWith('image/')) {
-      const img = new Image();
-      img.onload = () => {
-        // Force A4 dimensions for consistent coordinate system
-        setImgSize({ width: 595, height: 842 });
-      };
-      img.src = templateUrl;
-    }
-  }, [templateUrl, templateFile]);
 
   if (!templateUrl) return null;
 
   const isMultiLeaflet = bulkType === 'receipts' && leafletsPerPage > 1;
   const leafletCols = columns || 2;
   const leafletRows = rows || 3;
+  // Base page dimensions stay fixed; binding margin is carved out, shrinking each cell equally
+  const BASE_W = orientation === 'landscape' ? 842 : 595;
+  const CELL_H = orientation === 'landscape' ? 595 : 842;
+  const CELL_W = Math.floor((BASE_W * leafletCols - bindingMargin) / leafletCols);
+  const TOTAL_W = CELL_W * leafletCols + bindingMargin;
 
   // Render grid overlay
   const renderGrid = () => {
@@ -755,7 +712,7 @@ function TemplateCanvas({
             )}
             {nearestField && minDistance < 50 && (
               <div className="text-[9px] text-amber-400 font-semibold bg-black/50 px-1.5 rounded">
-                {Math.round(minDistance)}px from {nearestField.label}
+                {Math.round(minDistance)}px from {(nearestField as FieldConfig).label}
               </div>
             )}
           </div>
@@ -809,7 +766,7 @@ function TemplateCanvas({
       <div ref={containerRef} className="relative inline-block">
         <div 
           ref={canvasRef}
-          className={cn("inline-block", interactionMode === 'place_point' && !isSelecting && "cursor-crosshair")}
+          className={cn("inline-block", !isSpacePanning && interactionMode === 'place_point' && !isSelecting && "cursor-crosshair")}
           style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top left' }}
           onClick={handleCanvasClick}
           onMouseDown={handleCanvasMouseDown}
@@ -817,23 +774,30 @@ function TemplateCanvas({
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
         >
-          <div className="grid gap-1 bg-white p-1" style={{ gridTemplateColumns: `repeat(${leafletCols}, 595px)`, gridTemplateRows: `repeat(${leafletRows}, 842px)` }}>
+          <div className="bg-white flex" style={{ width: TOTAL_W, height: CELL_H * leafletRows }}>
+            {/* Binding margin strip */}
+            {bindingMargin > 0 && <div style={{ width: bindingMargin, height: CELL_H * leafletRows, flexShrink: 0, background: '#e5e7eb', borderRight: '1px solid #d1d5db' }} />}
+          <div className="grid" style={{ gridTemplateColumns: `repeat(${leafletCols}, ${CELL_W}px)`, gridTemplateRows: `repeat(${leafletRows}, ${CELL_H}px)`, width: CELL_W * leafletCols, height: CELL_H * leafletRows }}>
             {Array.from({ length: leafletsPerPage }, (_, leafletIndex) => (
-              <div key={leafletIndex} className="relative" style={{ width: 595, height: 842 }}>
+              <div key={leafletIndex} className="relative" style={{ width: CELL_W, height: CELL_H }} data-leaflet-cell>
                 {templateFile?.type.startsWith('image/') ? (
-                  <img src={templateUrl} alt={`Template ${leafletIndex + 1}`} className={cn("w-[595px] h-[842px] object-contain", templateBlackAndWhite && "grayscale")} style={{ filter: templateBlackAndWhite ? 'grayscale(100%) contrast(1.2)' : undefined }} draggable={false} />
+                  <img src={templateUrl!} alt={`Template ${leafletIndex + 1}`} className={cn("absolute inset-0 w-full h-full object-fill", templateBlackAndWhite && "grayscale")} style={{ filter: templateBlackAndWhite ? 'grayscale(100%)' : undefined }} draggable={false} />
+                ) : templateFile?.type === 'application/pdf' && pdfDataUrl ? (
+                  <img src={pdfDataUrl} alt={`Template ${leafletIndex + 1}`} className={cn("absolute inset-0 w-full h-full object-fill", templateBlackAndWhite && "grayscale")} style={{ filter: templateBlackAndWhite ? 'grayscale(100%)' : undefined }} draggable={false} />
                 ) : templateFile?.type === 'application/pdf' ? (
-                  <canvas className={cn("w-[595px] h-[842px] object-contain", templateBlackAndWhite && "grayscale")} style={{ filter: templateBlackAndWhite ? 'grayscale(100%) contrast(1.2)' : undefined }} />
+                  <div className="absolute inset-0 flex items-center justify-center bg-gray-100 text-gray-400 text-xs">Loading PDF…</div>
                 ) : null}
                 
                 {fields.map((field) => {
-                  // Calculate position from relative coordinates
-                  const A4_WIDTH = 595;
-                  const A4_HEIGHT = 842;
-                  const fieldX = (field.rx ?? field.x / A4_WIDTH) * A4_WIDTH;
-                  const fieldY = (field.ry ?? field.y / A4_HEIGHT) * A4_HEIGHT;
-                  
-                  const leafletNumber = fromNumber + leafletIndex;
+                  // Calculate position from relative coordinates, scaled to cell dimensions
+                  const fieldX = (field.rx ?? field.x / 595) * CELL_W;
+                  const fieldY = (field.ry ?? field.y / 842) * CELL_H;
+
+                  // Number right-to-left within each row
+                  const col = leafletIndex % leafletCols;
+                  const row = Math.floor(leafletIndex / leafletCols);
+                  const rtlIndex = row * leafletCols + (leafletCols - 1 - col);
+                  const leafletNumber = fromNumber + rtlIndex;
                   const isNumberField = field.type === 'number';
                   let displayText = '';
                   if (isNumberField) {
@@ -878,6 +842,7 @@ function TemplateCanvas({
               </div>
             ))}
           </div>
+          </div>
         </div>
       </div>
     );
@@ -886,9 +851,9 @@ function TemplateCanvas({
   // Single template view
   return (
     <div ref={containerRef} className="relative inline-block">
-      <div 
+      <div
         ref={canvasRef}
-        className={cn("relative inline-block", interactionMode === 'place_point' && !isSelecting && "cursor-crosshair", isSelecting && "cursor-crosshair")}
+        className={cn("relative inline-block", !isSpacePanning && interactionMode === 'place_point' && !isSelecting && "cursor-crosshair", !isSpacePanning && isSelecting && "cursor-crosshair")}
         style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top left' }}
         onClick={handleCanvasClick}
         onMouseDown={handleCanvasMouseDown}
@@ -897,9 +862,11 @@ function TemplateCanvas({
         onMouseLeave={handleMouseUp}
       >
         {templateFile?.type.startsWith('image/') ? (
-          <img src={templateUrl} alt="Template" className={cn("w-[595px] h-[842px] object-contain", templateBlackAndWhite && "grayscale")} style={{ filter: templateBlackAndWhite ? 'grayscale(100%) contrast(1.2)' : undefined }} draggable={false} />
+          <img src={templateUrl} alt="Template" className={cn("block", templateBlackAndWhite && "grayscale")} style={{ width: 595, height: 842, objectFit: 'fill', filter: templateBlackAndWhite ? 'grayscale(100%)' : undefined }} draggable={false} />
         ) : templateFile?.type === 'application/pdf' ? (
-          <canvas ref={pdfCanvasRef} className={cn("w-[595px] h-[842px] object-contain", templateBlackAndWhite && "grayscale")} style={{ filter: templateBlackAndWhite ? 'grayscale(100%) contrast(1.2)' : undefined }} />
+          pdfDataUrl
+            ? <img src={pdfDataUrl} alt="Template" className={cn("block", templateBlackAndWhite && "grayscale")} style={{ width: pdfSize?.width ?? 595, height: pdfSize?.height ?? 842, display: 'block', filter: templateBlackAndWhite ? 'grayscale(100%)' : undefined }} draggable={false} />
+            : <div className="w-[595px] h-[842px] bg-gray-100 flex items-center justify-center text-gray-400 text-sm">Loading PDF…</div>
         ) : (
           <div className="w-[595px] h-[842px] bg-gray-800 flex items-center justify-center"><p className="text-gray-500">Template Preview</p></div>
         )}
@@ -966,33 +933,49 @@ function TemplateCanvas({
               )}
               
               <div className={cn("relative cursor-move inline-block", isSelected && "ring-1 ring-blue-400/30 rounded")}>
-                {field.type === 'number' && (() => {
-                  // Get index of this number field among all number fields (continuous numbering)
-                  const numberFields = fields.filter(f => f.type === 'number');
-                  const fieldIndex = numberFields.findIndex(f => f.id === field.id);
-                  const actualNumber = fromNumber + fieldIndex;
-                  const baseNumber = String(actualNumber).padStart(zeroPadding, '0');
-                  const displayText = `${numberingPrefix}${numberingSeparator}${numberingYear}${numberingSeparator}${baseNumber}`;
-                  return (
-                    <div className="px-2 py-1 flex items-center justify-center text-sm font-bold" style={{ fontFamily: field.fontFamily || 'CrashNumberingSerif', fontWeight: field.bold ? 'bold' : 'normal', color: field.color || '#FF0000', fontSize: field.fontSize }}>
-                      {displayText}
-                    </div>
-                  );
-                })()}
-                {field.type === 'text' && (
-                  <div className="bg-black/70 px-2 py-1 rounded text-white text-xs shadow-lg" style={{ color: field.color, fontSize: field.fontSize, fontFamily: field.fontFamily || 'CrashNumberingSerif', fontWeight: field.bold ? 'bold' : 'normal' }}>
-                    {field.value || field.label}
-                  </div>
-                )}
-                {field.type === 'image' && (
+                {field.type === 'image' ? (
                   <div className="w-16 h-16 rounded-lg bg-gray-700 border-2 border-dashed border-blue-400 flex items-center justify-center shadow-lg">
                     <ImageIcon className="w-6 h-6 text-blue-400" />
                   </div>
-                )}
+                ) : (() => {
+                  // Certificates: show CSV value for the current preview row
+                  // Receipts: show auto-number
+                  let displayText = '';
+                  const mode = bulkType as string;
+                  if (mode === 'certificates') {
+                    const previewRow = csvData[currentPage - 1] ?? {};
+                    displayText = field.dataKey
+                      ? String(previewRow[field.dataKey] ?? '')
+                      : `[${field.label}]`;
+                  } else {
+                    // receipts mode — keep existing number display
+                    const numberFields = fields.filter(f => f.type === 'number');
+                    const fieldIndex = numberFields.findIndex(f => f.id === field.id);
+                    const actualNumber = fromNumber + fieldIndex;
+                    const baseNumber = String(actualNumber).padStart(zeroPadding, '0');
+                    displayText = `${numberingPrefix}${numberingSeparator}${numberingYear}${numberingSeparator}${baseNumber}`;
+                  }
+                  const isCert = mode === 'certificates';
+                  return (
+                    <div
+                      className={cn("px-2 py-0.5 whitespace-nowrap", isCert ? "rounded" : "font-bold")}
+                      style={{
+                        fontFamily: field.fontFamily || (isCert ? 'Times New Roman' : 'CrashNumberingSerif'),
+                        fontWeight: field.bold ? 'bold' : 'normal',
+                        color: field.color || (isCert ? '#000000' : '#FF0000'),
+                        fontSize: field.fontSize,
+                        background: isCert ? 'rgba(139,92,246,0.15)' : undefined,
+                        outline: isCert ? '1px dashed rgba(139,92,246,0.5)' : undefined,
+                      }}
+                    >
+                      {displayText || <span style={{ opacity: 0.4, fontStyle: 'italic' }}>{field.label}</span>}
+                    </div>
+                  );
+                })()}
               </div>
               
               {/* Coordinate tooltip */}
-              {(showCoordinates && (isSelected || hoveredField === field.id)) && (
+              {(isSelected || hoveredField === field.id) && (
                 <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black/80 text-white text-[10px] px-2 py-0.5 rounded whitespace-nowrap pointer-events-none z-50">
                   {Math.round(field.x)}, {Math.round(field.y)}
                 </div>
@@ -1022,94 +1005,57 @@ function TemplateCanvas({
 }
 
 // Helper function to convert image to high-quality grayscale
-function convertToGrayscale(imageBytes: Uint8Array, mimeType: string): Promise<Uint8Array<ArrayBuffer>> {
+function convertToGrayscale(imageBytes: Uint8Array, mimeType: string): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
     const blob = new Blob([imageBytes.buffer as ArrayBuffer], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const img = new Image();
-    
+
     img.onload = () => {
       const canvas = document.createElement('canvas');
-      // Render at higher resolution for better quality
-      const scale = 2;
+      // 3× upscale so the embedded PNG has enough pixels for crisp print output
+      const scale = 3;
       canvas.width = img.width * scale;
       canvas.height = img.height * scale;
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      
+
       if (!ctx) {
         URL.revokeObjectURL(url);
         reject(new Error('Failed to get canvas context'));
         return;
       }
-      
-      // Draw image at higher resolution
+
       ctx.scale(scale, scale);
       ctx.drawImage(img, 0, 0);
-      
-      // Get image data for pixel-level manipulation
+
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const data = imageData.data;
-      
-      // Apply high-quality grayscale conversion
+
       for (let i = 0; i < data.length; i += 4) {
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-        
-        // BT.709 luminance coefficients for perceptually accurate grayscale
-        let gray = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-        
-        // S-curve contrast enhancement for modern look
-        // Normalize to 0-1, apply curve, then denormalize
-        const normalized = gray / 255;
-        // Smooth S-curve: enhances midtones while preserving shadows/highlights
-        const contrasted = normalized < 0.5 
-          ? 2 * normalized * normalized 
-          : 1 - 2 * (1 - normalized) * (1 - normalized);
-        // Apply subtle contrast boost
-        const boost = 0.15;
-        const finalNormalized = normalized + (contrasted - normalized) * boost;
-        gray = Math.max(0, Math.min(255, finalNormalized * 255));
-        
-        // Set all channels to grayscale value
+        // BT.709 luminance — perceptually accurate grayscale
+        const gray = Math.round(0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]);
         data[i] = gray;
         data[i + 1] = gray;
         data[i + 2] = gray;
-        // Alpha channel (data[i + 3]) remains unchanged
       }
-      
-      // Put processed data back
+
       ctx.putImageData(imageData, 0, 0);
-      
-      // Scale back down for anti-aliasing
-      const finalCanvas = document.createElement('canvas');
-      finalCanvas.width = img.width;
-      finalCanvas.height = img.height;
-      const finalCtx = finalCanvas.getContext('2d');
-      if (finalCtx) {
-        finalCtx.drawImage(canvas, 0, 0, img.width, img.height);
-      }
-      
-      // Convert to PNG for lossless quality
-      finalCanvas.toBlob((blob) => {
+
+      canvas.toBlob((blob) => {
         URL.revokeObjectURL(url);
-        if (blob) {
-          const reader = new FileReader();
-          reader.onload = () => {
-            resolve(new Uint8Array(reader.result as ArrayBuffer));
-          };
-          reader.readAsArrayBuffer(blob);
-        } else {
-          reject(new Error('Failed to convert image'));
-        }
+        if (!blob) { reject(new Error('toBlob failed')); return; }
+        const reader = new FileReader();
+        reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer));
+        reader.onerror = reject;
+        reader.readAsArrayBuffer(blob);
       }, 'image/png');
     };
-    
+
     img.onerror = () => {
       URL.revokeObjectURL(url);
       reject(new Error('Failed to load image'));
     };
-    
+
     img.src = url;
   });
 }
@@ -1136,10 +1082,10 @@ export default function App() {
     generatedPdfUrl, setGeneratedPdfUrl,
     fields, addField, removeField, updateField, selectedFieldId, setSelectedFieldId,
     selectedFieldIds, toggleFieldSelection, clearFieldSelection, updateMultipleFields, selectAllNumberFields,
-    bulkType, csvData, setCsvData, setExtractedImages,
+    bulkType, csvData, csvHeaders, setCsvData, extractedImages, setExtractedImages,
     fromNumber, toNumber, zeroPadding, numberingPrefix, numberingYear, numberingSeparator,
     setNumbering, setCustomNumbering,
-    leafletsPerPage, columns, rows, orientation, setLayout,
+    leafletsPerPage, columns, rows, orientation, setLayout, bindingMargin, setBindingMargin,
     templateBlackAndWhite, setTemplateBlackAndWhite,
     pagesToGenerate, setPagesToGenerate,
     customFonts,
@@ -1156,6 +1102,68 @@ export default function App() {
   const [view, setView] = useState<'landing' | 'studio'>('landing');
   const [activeTab, setActiveTab] = useState<'data' | 'typography' | 'layout'>('data');
   const [isGenerating, setIsGenerating] = useState(false);
+
+  // Canvas scroll container ref for pan + wheel zoom
+  const canvasScrollRef = useRef<HTMLDivElement>(null);
+  const [isSpacePanning, setIsSpacePanning] = useState(false);
+  const [spaceDown, setSpaceDown] = useState(false);
+  const canvasPanStart = useRef<{ mx: number; my: number; sl: number; st: number } | null>(null);
+  const zoomRef = useRef(zoomLevel);
+  zoomRef.current = zoomLevel;
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.code === 'Space') { e.preventDefault(); setSpaceDown(true); }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') { setSpaceDown(false); setIsSpacePanning(false); canvasPanStart.current = null; }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
+  }, []);
+
+  // Auto-fit zoom whenever layout or view changes, then re-center
+  useEffect(() => {
+    const el = canvasScrollRef.current;
+    if (!el || view !== 'studio') return;
+    const isMulti = leafletsPerPage > 1;
+    const cellW = orientation === 'landscape' ? 842 : 595;
+    const cellH = orientation === 'landscape' ? 595 : 842;
+    const leafletCols_ = isMulti ? (columns || 2) : 1;
+    const shrunkCellW = isMulti ? Math.floor((cellW * leafletCols_ - bindingMargin) / leafletCols_) : cellW;
+    const totalW = shrunkCellW * leafletCols_ + (isMulti ? bindingMargin : 0);
+    const totalH = cellH * (isMulti ? (rows || 3) : 1);
+    const padding = 80;
+    const fitZoom = Math.min(
+      (el.clientWidth - padding) / totalW,
+      (el.clientHeight - padding) / totalH,
+      1 // never zoom in beyond 100%
+    );
+    setZoomLevel(Math.max(0.1, fitZoom));
+  }, [view, leafletsPerPage, columns, rows, orientation]);
+
+  // Center the canvas in the scroll viewport whenever zoom changes
+  useEffect(() => {
+    const el = canvasScrollRef.current;
+    if (!el || view !== 'studio') return;
+    el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
+    el.scrollTop  = (el.scrollHeight - el.clientHeight) / 2;
+  }, [view, zoomLevel]);
+
+  useEffect(() => {
+    const el = canvasScrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -0.15 : 0.15;
+      setZoomLevel(Math.min(3, Math.max(0.5, zoomLevel + delta)));
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [zoomLevel]);
   const [pdfDocument, setPdfDocument] = useState<any>(null);
   const [numPages, setNumPages] = useState<number>(0);
   const selectedField = fields.find(f => f.id === selectedFieldId);
@@ -1195,43 +1203,56 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [undo, redo]);
 
-  const onDrop = useCallback((acceptedFiles: File[]) => {
+  const onDropForMode = useCallback((mode: 'receipts' | 'certificates', acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
+      if (templateUrl) URL.revokeObjectURL(templateUrl);
       const file = acceptedFiles[0];
       const url = URL.createObjectURL(file);
+      store.setBulkType(mode);
       setTemplate(file, url);
       setView('studio');
     }
-  }, [setTemplate]);
+  }, [setTemplate, templateUrl, store]);
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop,
+  const { getRootProps: getReceiptRootProps, getInputProps: getReceiptInputProps, isDragActive: isReceiptDragActive } = useDropzone({
+    onDrop: (files) => onDropForMode('receipts', files),
     accept: { 'image/*': ['.png', '.jpg', '.jpeg'], 'application/pdf': ['.pdf'] },
-    maxFiles: 1,
-    multiple: false,
-    onDragEnter: () => {},
-    onDragOver: () => {},
-    onDragLeave: () => {}
+    maxFiles: 1, multiple: false,
+    onDragEnter: () => {}, onDragOver: () => {}, onDragLeave: () => {},
+  });
+
+  const { getRootProps: getCertRootProps, getInputProps: getCertInputProps, isDragActive: isCertDragActive } = useDropzone({
+    onDrop: (files) => onDropForMode('certificates', files),
+    accept: { 'image/*': ['.png', '.jpg', '.jpeg'], 'application/pdf': ['.pdf'] },
+    maxFiles: 1, multiple: false,
+    onDragEnter: () => {}, onDragOver: () => {}, onDragLeave: () => {},
   });
 
   const handleDataUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.name.endsWith('.zip')) {
-      const zip = await JSZip.loadAsync(file);
-      const images: Record<string, ArrayBuffer> = {};
-      let csvContent: string | null = null;
-      for (const [path, zipEntry] of Object.entries(zip.files)) {
-        if (zipEntry.dir) continue;
-        if (path.endsWith('.csv') && !csvContent) csvContent = await zipEntry.async('text');
-        if (/\.(jpg|jpeg|png|gif|webp)$/i.test(path)) {
-          const fileName = path.split('/').pop()?.toLowerCase() || '';
-          images[fileName] = await zipEntry.async('arraybuffer');
+      try {
+        const zip = await JSZip.loadAsync(file);
+        const images: Record<string, ArrayBuffer> = {};
+        let csvContent: string | null = null;
+        for (const [path, zipEntry] of Object.entries(zip.files)) {
+          if (zipEntry.dir) continue;
+          if (path.endsWith('.csv') && !csvContent) csvContent = await zipEntry.async('text');
+          if (/\.(jpg|jpeg|png|gif|webp)$/i.test(path)) {
+            const fileName = path.split('/').pop()?.toLowerCase() || '';
+            images[fileName] = await zipEntry.async('arraybuffer');
+          }
         }
-      }
-      if (csvContent) {
-        setExtractedImages(images);
-        parseAndLoadCsv(csvContent);
+        if (csvContent) {
+          setExtractedImages(images);
+          parseAndLoadCsv(csvContent);
+        } else {
+          alert('No CSV file found inside the ZIP.');
+        }
+      } catch (err) {
+        console.error('Failed to read ZIP file:', err);
+        alert('Failed to read ZIP file. Please ensure it is a valid ZIP archive.');
       }
     } else {
       const reader = new FileReader();
@@ -1239,19 +1260,55 @@ export default function App() {
         const csvText = event.target?.result as string;
         if (csvText) parseAndLoadCsv(csvText);
       };
+      reader.onerror = () => alert('Failed to read the CSV file.');
       reader.readAsText(file);
     }
   };
 
   const parseAndLoadCsv = (csvText: string) => {
+    // Tokenize one CSV line, respecting RFC 4180 quoted fields
+    const parseLine = (line: string): string[] => {
+      const result: string[] = [];
+      let i = 0;
+      while (i < line.length) {
+        if (line[i] === '"') {
+          // Quoted field
+          let field = '';
+          i++; // skip opening quote
+          while (i < line.length) {
+            if (line[i] === '"' && line[i + 1] === '"') {
+              field += '"'; i += 2; // escaped quote
+            } else if (line[i] === '"') {
+              i++; break; // closing quote
+            } else {
+              field += line[i++];
+            }
+          }
+          result.push(field);
+          if (line[i] === ',') i++; // skip comma after field
+        } else {
+          // Unquoted field
+          const end = line.indexOf(',', i);
+          if (end === -1) {
+            result.push(line.slice(i).trim());
+            break;
+          } else {
+            result.push(line.slice(i, end).trim());
+            i = end + 1;
+          }
+        }
+      }
+      return result;
+    };
+
     const lines = csvText.split('\n').filter(line => line.trim());
-    if (lines.length === 0) return;
-    const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+    if (lines.length < 2) return; // need at least header + one data row
+    const headers = parseLine(lines[0]);
     const data: any[] = [];
     for (let i = 1; i < lines.length; i++) {
-      const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+      const values = parseLine(lines[i]);
       const row: any = {};
-      headers.forEach((header, index) => row[header] = values[index] || '');
+      headers.forEach((header, index) => { row[header] = values[index] ?? ''; });
       data.push(row);
     }
     setCsvData(data, headers);
@@ -1269,6 +1326,7 @@ export default function App() {
     const x = position?.x ?? rx * A4_WIDTH;
     const y = position?.y ?? ry * A4_HEIGHT;
     
+    const isCertMode = bulkType === 'certificates';
     const newField: FieldConfig = {
       id: `field-${Date.now()}`,
       type,
@@ -1277,13 +1335,13 @@ export default function App() {
       y,
       rx,
       ry,
-      fontSize: 20,
-      fontFamily: 'CrashNumberingSerif',
-      color: '#FF0000',
-      bold: true,
+      fontSize: isCertMode ? 14 : 20,
+      fontFamily: isCertMode ? 'Times New Roman' : 'CrashNumberingSerif',
+      color: isCertMode ? '#000000' : '#FF0000',
+      bold: false,
       align: 'left',
       value: type === 'number' ? `P${pointCounter}` : 'Sample Text',
-      dataKey: type === 'number' ? `P${pointCounter}` : undefined,
+      dataKey: undefined, // user maps via the panel
       width: type === 'image' ? 100 : undefined,
       height: type === 'image' ? 100 : undefined,
     };
@@ -1308,58 +1366,82 @@ export default function App() {
         const firstPage = sourcePdf.getPages()[0];
         const { width, height } = firstPage.getSize();
         pageWidth = width; pageHeight = height;
-        
-        // If Black & White mode is enabled for PDF templates, convert to grayscale image
-        if (templateBlackAndWhite) {
+
+        // Always render PDF page to a PNG image so it can be tiled into multi-leaflet cells.
+        // (sourcePdf page-copy only works for single-per-page mode.)
+        {
+          const blobUrl = URL.createObjectURL(new Blob([fileBytes], { type: 'application/pdf' }));
           try {
-            // Load PDF with pdfjs for rendering
-            const loadingTask = pdfjsLib.getDocument(URL.createObjectURL(new Blob([fileBytes], { type: 'application/pdf' })));
+            const pdfJs = await pdfjsLib.getDocument(blobUrl).promise;
+            const pg = await pdfJs.getPage(1);
+            const vp = pg.getViewport({ scale: 2 }); // 2× for sharpness
+            const offscreen = document.createElement('canvas');
+            offscreen.width = vp.width;
+            offscreen.height = vp.height;
+            const ctx = offscreen.getContext('2d');
+            if (ctx) {
+              await (pg.render({ canvasContext: ctx, viewport: vp } as any).promise);
+              const pngBytes = await new Promise<Uint8Array>((resolve, reject) => {
+                offscreen.toBlob((blob) => {
+                  if (!blob) { reject(new Error('toBlob failed')); return; }
+                  const reader = new FileReader();
+                  reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer));
+                  reader.onerror = reject;
+                  reader.readAsArrayBuffer(blob);
+                }, 'image/png');
+              });
+              templateImage = await outputPdf.embedPng(pngBytes);
+            }
+          } catch (err) {
+            console.error('Failed to render PDF to image for multi-leaflet:', err);
+          } finally {
+            URL.revokeObjectURL(blobUrl);
+          }
+        }
+
+        // If Black & White mode is enabled for PDF templates, override with grayscale image
+        if (templateBlackAndWhite) {
+          const blobUrl = URL.createObjectURL(new Blob([fileBytes], { type: 'application/pdf' }));
+          try {
+            const loadingTask = pdfjsLib.getDocument(blobUrl);
             const pdf = await loadingTask.promise;
             const page = await pdf.getPage(1);
-            
-            // Render to canvas at scale=1 to preserve original dimensions
+
+            // Render at 3× for print-quality resolution (~216 DPI at A4 size)
+            const viewport = page.getViewport({ scale: 3 });
             const canvas = document.createElement('canvas');
-            const viewport = page.getViewport({ scale: 1 });
             canvas.width = viewport.width;
             canvas.height = viewport.height;
-            const ctx = canvas.getContext('2d');
-            
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
             if (ctx) {
               const renderContext: any = { canvasContext: ctx, viewport };
               await page.render(renderContext).promise;
-              
-              // Apply high-quality grayscale conversion using pixel manipulation
+
+              // BT.709 grayscale — no contrast manipulation to preserve design quality
               const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
               const data = imageData.data;
-              
+
               for (let i = 0; i < data.length; i += 4) {
-                const r = data[i];
-                const g = data[i + 1];
-                const b = data[i + 2];
-                
-                // BT.709 luminance coefficients for perceptually accurate grayscale
-                let gray = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-                
-                // S-curve contrast enhancement for modern look
-                const normalized = gray / 255;
-                const contrasted = normalized < 0.5 
-                  ? 2 * normalized * normalized 
-                  : 1 - 2 * (1 - normalized) * (1 - normalized);
-                const boost = 0.15;
-                const finalNormalized = normalized + (contrasted - normalized) * boost;
-                gray = Math.max(0, Math.min(255, finalNormalized * 255));
-                
+                const gray = Math.round(0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]);
                 data[i] = gray;
                 data[i + 1] = gray;
                 data[i + 2] = gray;
               }
-              
+
               ctx.putImageData(imageData, 0, 0);
-              
-              // Convert canvas to PNG bytes
-              const pngUrl = canvas.toDataURL('image/png');
-              const pngBytes = Uint8Array.from(atob(pngUrl.split(',')[1]), c => c.charCodeAt(0));
-              
+
+              // Convert to PNG for lossless quality
+              const pngBytes = await new Promise<Uint8Array>((resolve, reject) => {
+                canvas.toBlob((blob) => {
+                  if (!blob) { reject(new Error('toBlob failed')); return; }
+                  const reader = new FileReader();
+                  reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer));
+                  reader.onerror = reject;
+                  reader.readAsArrayBuffer(blob);
+                }, 'image/png');
+              });
+
               // Embed as PNG image instead of using PDF source
               templateImage = await outputPdf.embedPng(pngBytes);
               pageWidth = templateImage.width;
@@ -1369,6 +1451,8 @@ export default function App() {
           } catch (err) {
             console.error('Failed to convert PDF to grayscale:', err);
             // Fall back to original PDF if conversion fails
+          } finally {
+            URL.revokeObjectURL(blobUrl);
           }
         }
       } else if (templateFile.type.startsWith('image/')) {
@@ -1427,15 +1511,33 @@ export default function App() {
       };
 
       const numberFields = fields.filter(f => f.type === 'number');
-      const staticFields = fields.filter(f => f.type !== 'number');
-      const itemsPerPage = numberFields.length;
-      const shouldLoopReceipts = bulkType === 'receipts' && itemsPerPage > 0;
+      const shouldLoopReceipts = bulkType === 'receipts' && numberFields.length > 0;
       const shouldLoopCertificates = bulkType === 'certificates' && csvData.length > 0;
       const isMultiLeaflet = bulkType === 'receipts' && leafletsPerPage > 1;
       const leafletCols = columns || 2;
       const leafletRows = rows || 3;
-      
-      // Calculate required pages for receipts mode
+
+      // Validate certificates mode
+      if (bulkType === 'certificates') {
+        if (csvData.length === 0) {
+          alert('No data rows found in CSV. Please upload a CSV with at least one data row.');
+          setIsGenerating(false);
+          return;
+        }
+        if (fields.length === 0) {
+          alert('No fields placed on the template. Use "Place Merge Point" to add fields, then map them to CSV columns.');
+          setIsGenerating(false);
+          return;
+        }
+        const unmapped = fields.filter(f => !f.dataKey);
+        if (unmapped.length > 0) {
+          const names = unmapped.map(f => f.label).join(', ');
+          const proceed = window.confirm(`${unmapped.length} field(s) are not mapped to a CSV column (${names}). They will appear blank. Continue anyway?`);
+          if (!proceed) { setIsGenerating(false); return; }
+        }
+      }
+
+      // Calculate page count
       let maxPages = pagesToGenerate;
       if (!maxPages && shouldLoopReceipts) {
         const totalReceipts = toNumber - fromNumber + 1;
@@ -1446,154 +1548,151 @@ export default function App() {
       } else if (!maxPages) {
         maxPages = 1;
       }
-      
+
+      // Helper: draw a text field onto a PDF page cell.
+      // rx/ry are 0–1 fractions of the cell. pageW/pageH are the cell dimensions in PDF points.
+      // offsetX/offsetY shift the origin for multi-leaflet cells (PDF Y is from bottom-left).
+      const drawTextField = (page: any, field: typeof fields[0], text: string, pageW: number, pageH: number, offsetX = 0, offsetY = 0) => {
+        // Recover cell-relative position from stored fractions
+        const rx = field.rx ?? field.x / 595;
+        const ry = field.ry ?? field.y / 842;
+        const cellX = rx * pageW;
+        const cellY = ry * pageH;
+
+        const safeText = String(text ?? '').trim();
+        if (!safeText) return;
+
+        const font = getFont(field);
+        const textWidth = font.widthOfTextAtSize(safeText, field.fontSize);
+
+        const hex = (field.color || '#000000').replace('#', '').padEnd(6, '0');
+        const r = parseInt(hex.substring(0, 2), 16) / 255;
+        const g = parseInt(hex.substring(2, 4), 16) / 255;
+        const b = parseInt(hex.substring(4, 6), 16) / 255;
+
+        // Canvas: outer div centered at (cellX, cellY) via translate(-50%,-50%).
+        // Line-height ≈ 1.2 * fontSize. Baseline from top of line box ≈ fontSize * 0.8 (ascender).
+        // Baseline from page top = cellY - (1.2*fontSize)/2 + fontSize*0.8
+        //                        = cellY - fontSize*0.6 + fontSize*0.8
+        //                        = cellY + fontSize * 0.2
+        // PDF y is measured from page bottom:
+        const pdfX = cellX - textWidth / 2 + offsetX;
+        const pdfY = pageH - cellY - field.fontSize * 0.2 + offsetY;
+
+        page.drawText(safeText, {
+          x: Math.max(0, pdfX),
+          y: Math.max(0, pdfY),
+          size: field.fontSize,
+          font,
+          color: rgb(r, g, b),
+        });
+      };
+
       let currentNumber = fromNumber;
       let csvRowIndex = 0;
-      
-      console.log('PDF Generation Debug:', {
-        shouldLoopReceipts,
-        shouldLoopCertificates,
-        isMultiLeaflet,
-        itemsPerPage,
-        leafletsPerPage,
-        fromNumber,
-        toNumber,
-        numberFieldsCount: numberFields.length
-      });
 
       for (let pageNum = 0; pageNum < maxPages; pageNum++) {
-        // Check if we should stop before creating a new page
         if (shouldLoopReceipts && currentNumber > toNumber) break;
         if (shouldLoopCertificates && csvRowIndex >= csvData.length) break;
 
-        let page: any;
-        
-        if (isMultiLeaflet) {
-          // Multi-leaflet layout: create a larger page with multiple templates
-          // Use A4 dimensions for consistent coordinate system
+        // ── CERTIFICATES: one page per CSV row ──────────────────────────────────
+        if (shouldLoopCertificates) {
           const A4_WIDTH = 595;
           const A4_HEIGHT = 842;
-          const totalWidth = A4_WIDTH * leafletCols;
-          const totalHeight = A4_HEIGHT * leafletRows;
-          page = outputPdf.addPage([totalWidth, totalHeight]);
-          
-          // Draw template for each leaflet position (scaled to A4)
-          for (let i = 0; i < leafletsPerPage; i++) {
-            const col = i % leafletCols;
-            const row = Math.floor(i / leafletCols);
-            const offsetX = col * A4_WIDTH;
-            const offsetY = totalHeight - (row + 1) * A4_HEIGHT; // PDF coords from bottom
-            
-            if (sourcePdf) {
-              // For PDF templates, we need to embed and draw (scaled to A4)
-              if (templateImage) {
-                page.drawImage(templateImage, { x: offsetX, y: offsetY, width: A4_WIDTH, height: A4_HEIGHT });
-              }
-            } else if (templateImage) {
-              page.drawImage(templateImage, { x: offsetX, y: offsetY, width: A4_WIDTH, height: A4_HEIGHT });
+          let page: any;
+
+          if (sourcePdf) {
+            const [copiedPage] = await outputPdf.copyPages(sourcePdf, [0]);
+            page = outputPdf.addPage(copiedPage);
+          } else {
+            page = outputPdf.addPage([A4_WIDTH, A4_HEIGHT]);
+            if (templateImage) {
+              page.drawImage(templateImage, { x: 0, y: 0, width: A4_WIDTH, height: A4_HEIGHT });
             }
           }
-          
-          // Draw fields on each leaflet
+
+          const { width: pageW, height: pageH } = page.getSize();
+          const dataRow = csvData[csvRowIndex] ?? {};
+
+          // Every field is CSV-driven: look up value by dataKey
+          for (const field of fields) {
+            const csvValue = field.dataKey ? String(dataRow[field.dataKey] ?? '').trim() : '';
+            const fallback = field.value || field.label || '';
+            const text = csvValue || fallback;
+
+            if (field.type === 'image') {
+              // Image fields: look up extracted image by filename stored in CSV cell
+              const filename = csvValue.toLowerCase();
+              const imgBuffer = filename ? extractedImages[filename] : null;
+              if (imgBuffer) {
+                try {
+                  const fieldX = (field.rx !== undefined ? field.rx : field.x / pageW) * pageW;
+                  const fieldY = (field.ry !== undefined ? field.ry : field.y / pageH) * pageH;
+                  const w = field.width ?? 80;
+                  const h = field.height ?? 80;
+                  const embeddedImg = filename.endsWith('.jpg') || filename.endsWith('.jpeg')
+                    ? await outputPdf.embedJpg(new Uint8Array(imgBuffer))
+                    : await outputPdf.embedPng(new Uint8Array(imgBuffer));
+                  page.drawImage(embeddedImg, {
+                    x: fieldX - w / 2,
+                    y: pageH - fieldY - h / 2,
+                    width: w,
+                    height: h,
+                  });
+                } catch (e) {
+                  console.warn(`Could not embed image "${filename}":`, e);
+                }
+              }
+            } else {
+              // text and number field types both render text from CSV
+              drawTextField(page, field, text, pageW, pageH);
+            }
+          }
+
+          csvRowIndex++;
+
+        // ── RECEIPTS: multi-leaflet ──────────────────────────────────────────────
+        } else if (isMultiLeaflet) {
+          const BASE_W = orientation === 'landscape' ? 842 : 595;
+          const CELL_H = orientation === 'landscape' ? 595 : 842;
+          const BIND = bindingMargin;
+          const CELL_W = Math.floor((BASE_W * leafletCols - BIND) / leafletCols);
+          const totalWidth = CELL_W * leafletCols + BIND;
+          const totalHeight = CELL_H * leafletRows;
+          const page = outputPdf.addPage([totalWidth, totalHeight]);
+
           for (let i = 0; i < leafletsPerPage; i++) {
             const col = i % leafletCols;
             const row = Math.floor(i / leafletCols);
-            const offsetX = col * A4_WIDTH;
-            const offsetY = totalHeight - (row + 1) * A4_HEIGHT;
-            
-            // Calculate the number for this leaflet position
-            const leafletNumber = fromNumber + i + (pageNum * leafletsPerPage);
+            // All cells shifted right by binding margin
+            const offsetX = BIND + col * CELL_W;
+            const offsetY = totalHeight - (row + 1) * CELL_H;
+
+            if (templateImage) {
+              page.drawImage(templateImage, { x: offsetX, y: offsetY, width: CELL_W, height: CELL_H });
+            }
+
+            // Number right-to-left within each row
+            const rtlIndex = row * leafletCols + (leafletCols - 1 - col);
+            const leafletNumber = fromNumber + rtlIndex + pageNum * leafletsPerPage;
             if (leafletNumber > toNumber) continue;
-            
-            // Draw number fields on this leaflet
+
             for (const field of numberFields) {
-              // Calculate position from relative coordinates
-              const fieldX = (field.rx ?? field.x / A4_WIDTH) * A4_WIDTH;
-              const fieldY = (field.ry ?? field.y / A4_HEIGHT) * A4_HEIGHT;
-              
-              // Use continuous numbering: currentNumber increases for each leaflet
-              const fieldIndex = numberFields.findIndex(f => f.id === field.id);
-              const actualNumber = currentNumber + fieldIndex;
-              
+              const fieldIndex = numberFields.indexOf(field);
+              const actualNumber = leafletNumber + fieldIndex;
               if (actualNumber > toNumber) continue;
-              
-              const baseNumber = String(actualNumber).padStart(zeroPadding, '0');
-              const text = `${numberingPrefix}${numberingSeparator}${numberingYear}${numberingSeparator}${baseNumber}`;
-              const hex = field.color.replace('#', '');
-              const r = parseInt(hex.substring(0, 2), 16) / 255;
-              const g = parseInt(hex.substring(2, 4), 16) / 255;
-              const b = parseInt(hex.substring(4, 6), 16) / 255;
-              
-              const font = getFont(field);
-              const textWidth = font.widthOfTextAtSize(text, field.fontSize);
-              
-              // Center text on field position (matching preview transform: translate(-50%, -50%))
-              const x = fieldX - textWidth / 2 + offsetX;
-              const pdfY = offsetY + A4_HEIGHT - fieldY - field.fontSize / 2;
-              
-              page.drawText(text, {
-                x: x,
-                y: pdfY,
-                size: field.fontSize,
-                font: font,
-                color: rgb(r, g, b),
-              });
+              const text = `${numberingPrefix}${numberingSeparator}${numberingYear}${numberingSeparator}${String(actualNumber).padStart(zeroPadding, '0')}`;
+              drawTextField(page, field, text, CELL_W, CELL_H, offsetX, offsetY);
             }
-            
-            // Draw static fields for this leaflet
-            for (const field of staticFields) {
-              // Calculate position from relative coordinates
-              const fieldX = (field.rx ?? field.x / A4_WIDTH) * A4_WIDTH;
-              const fieldY = (field.ry ?? field.y / A4_HEIGHT) * A4_HEIGHT;
-              
-              let text = field.value || '';
-              if (shouldLoopCertificates && field.dataKey && csvData[csvRowIndex]) {
-                text = csvData[csvRowIndex][field.dataKey] || text;
-              }
-              if (field.type === 'text') {
-                const hex = field.color.replace('#', '');
-                const r = parseInt(hex.substring(0, 2), 16) / 255;
-                const g = parseInt(hex.substring(2, 4), 16) / 255;
-                const b = parseInt(hex.substring(4, 6), 16) / 255;
-                
-                const font = getFont(field);
-                const textWidth = font.widthOfTextAtSize(text, field.fontSize);
-                
-                // Center text on field position (matching preview transform: translate(-50%, -50%))
-                const x = fieldX - textWidth / 2 + offsetX;
-                const pdfY = offsetY + A4_HEIGHT - fieldY - field.fontSize / 2;
-                
-                page.drawText(text, {
-                  x: x,
-                  y: pdfY,
-                  size: field.fontSize,
-                  font: font,
-                  color: rgb(r, g, b),
-                });
-              }
-            }
-            
-            console.log(`Leaflet ${i}: currentNumber before = ${currentNumber}, numberFields.length = ${numberFields.length}`);
-            
-            if (shouldLoopCertificates) {
-              csvRowIndex++;
-              console.log(`  Incremented csvRowIndex to ${csvRowIndex}`);
-            }
-            
-            if (shouldLoopReceipts) {
-              // Increment currentNumber by the number of fields per leaflet
-              currentNumber += numberFields.length;
-              console.log(`  Incremented currentNumber to ${currentNumber}`);
-            }
-            
-            console.log(`Leaflet ${i}: currentNumber after = ${currentNumber}`);
           }
-          
+          currentNumber += numberFields.length;
+
+        // ── RECEIPTS: single per page ────────────────────────────────────────────
         } else {
-          // Single leaflet per page - use A4 dimensions
           const A4_WIDTH = 595;
           const A4_HEIGHT = 842;
-          
+          let page: any;
+
           if (sourcePdf) {
             const [copiedPage] = await outputPdf.copyPages(sourcePdf, [0]);
             page = outputPdf.addPage(copiedPage);
@@ -1601,88 +1700,25 @@ export default function App() {
             page = outputPdf.addPage([A4_WIDTH, A4_HEIGHT]);
             if (templateImage) page.drawImage(templateImage, { x: 0, y: 0, width: A4_WIDTH, height: A4_HEIGHT });
           }
-          
-          const currentDataRow = shouldLoopCertificates ? csvData[csvRowIndex] : null;
 
-          // Draw number fields
+          const { width: pageW, height: pageH } = page.getSize();
+
           for (const field of numberFields) {
-            // Calculate position from relative coordinates
-            const fieldX = (field.rx ?? field.x / A4_WIDTH) * A4_WIDTH;
-            const fieldY = (field.ry ?? field.y / A4_HEIGHT) * A4_HEIGHT;
-            
-            // Use continuous numbering: currentNumber increases for each page
-            const fieldIndex = numberFields.findIndex(f => f.id === field.id);
+            const fieldIndex = numberFields.indexOf(field);
             const actualNumber = currentNumber + fieldIndex;
-            
-            if (shouldLoopReceipts && actualNumber > toNumber) break;
-            
-            const baseNumber = String(actualNumber).padStart(zeroPadding, '0');
-            const text = `${numberingPrefix}${numberingSeparator}${numberingYear}${numberingSeparator}${baseNumber}`;
-            const hex = field.color.replace('#', '');
-            const r = parseInt(hex.substring(0, 2), 16) / 255;
-            const g = parseInt(hex.substring(2, 4), 16) / 255;
-            const b = parseInt(hex.substring(4, 6), 16) / 255;
-            
-            const font = getFont(field);
-            const textWidth = font.widthOfTextAtSize(text, field.fontSize);
-            
-            // Center text on field position (matching preview transform: translate(-50%, -50%))
-            const x = fieldX - textWidth / 2;
-            const pdfY = A4_HEIGHT - fieldY - field.fontSize / 2;
-            
-            page.drawText(text, {
-              x: x,
-              y: pdfY,
-              size: field.fontSize,
-              font: font,
-              color: rgb(r, g, b),
-            });
+            if (actualNumber > toNumber) break;
+            const text = `${numberingPrefix}${numberingSeparator}${numberingYear}${numberingSeparator}${String(actualNumber).padStart(zeroPadding, '0')}`;
+            drawTextField(page, field, text, pageW, pageH, 0, 0);
           }
-
-          // Increment currentNumber for receipts after drawing all fields on this page
-          if (shouldLoopReceipts) {
-            currentNumber += numberFields.length;
-          }
-
-          // Draw static fields
-          for (const field of staticFields) {
-            // Calculate position from relative coordinates
-            const fieldX = (field.rx ?? field.x / A4_WIDTH) * A4_WIDTH;
-            const fieldY = (field.ry ?? field.y / A4_HEIGHT) * A4_HEIGHT;
-            
-            let text = field.value || '';
-            if (shouldLoopCertificates && field.dataKey && currentDataRow) {
-              text = currentDataRow[field.dataKey] || text;
-            }
-            if (field.type === 'text') {
-              const hex = field.color.replace('#', '');
-              const r = parseInt(hex.substring(0, 2), 16) / 255;
-              const g = parseInt(hex.substring(2, 4), 16) / 255;
-              const b = parseInt(hex.substring(4, 6), 16) / 255;
-              
-              const font = getFont(field);
-              const textWidth = font.widthOfTextAtSize(text, field.fontSize);
-              
-              // Center text on field position (matching preview transform: translate(-50%, -50%))
-              const x = fieldX - textWidth / 2;
-              const pdfY = A4_HEIGHT - fieldY - field.fontSize / 2;
-              
-              page.drawText(text, {
-                x: x,
-                y: pdfY,
-                size: field.fontSize,
-                font: font,
-                color: rgb(r, g, b),
-              });
-            }
-          }
-          
-          if (shouldLoopCertificates) csvRowIndex++;
+          currentNumber += numberFields.length;
         }
       }
 
       const pdfBytes = await outputPdf.save();
       const blob = new Blob([pdfBytes as unknown as ArrayBuffer], { type: 'application/pdf' });
+      // Revoke previous generated PDF blob to avoid memory leaks
+      const prevUrl = useStore.getState().generatedPdfUrl;
+      if (prevUrl) URL.revokeObjectURL(prevUrl);
       const url = URL.createObjectURL(blob);
       setGeneratedPdfUrl(url);
     } catch (error) {
@@ -1703,53 +1739,128 @@ export default function App() {
   // --- LANDING PAGE ---
   if (view === 'landing') {
     return (
-      <div className="h-screen bg-[#0a0a0a] text-white flex flex-col items-center justify-center p-8 font-sans">
-        <div className="text-center mb-12">
-          <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center mx-auto mb-6 shadow-2xl shadow-blue-500/20">
-            <Sparkles className="w-10 h-10 text-white" />
+      <div className="min-h-screen bg-[#0a0a0a] text-white flex flex-col items-center justify-center p-8 font-sans">
+        {/* Header */}
+        <div className="text-center mb-14">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center mx-auto mb-5 shadow-2xl shadow-blue-500/25">
+            <FileText className="w-8 h-8 text-white" />
           </div>
           <h1 className="text-4xl font-bold mb-3 bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">
-            Document Generator
+            MUZARA Bulk Creator
           </h1>
-          <p className="text-gray-400 text-lg max-w-md">
-            Upload your template to start creating bulk PDFs with automatic numbering
+          <p className="text-gray-400 text-base max-w-sm mx-auto">
+            Choose a document type, upload your designed template, and generate in bulk.
           </p>
         </div>
 
-        <div 
-          {...getRootProps()} 
-          className={cn(
-            "w-full max-w-2xl border-3 border-dashed rounded-3xl p-16 flex flex-col items-center justify-center text-center cursor-pointer transition-all duration-300",
-            isDragActive ? "border-blue-500 bg-blue-500/10 shadow-2xl shadow-blue-500/20 scale-105" : "border-white/20 bg-white/5 hover:border-white/40 hover:bg-white/10"
-          )}
-        >
-          <input {...getInputProps()} />
-          <div className="w-24 h-24 rounded-3xl bg-white/10 flex items-center justify-center mb-6">
-            <FileUp className={cn("w-12 h-12 transition-all", isDragActive ? "text-blue-400 scale-110" : "text-gray-400")} />
+        {/* Two mode cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-4xl">
+
+          {/* ── RECEIPTS ── */}
+          <div
+            {...getReceiptRootProps()}
+            className={cn(
+              "relative group flex flex-col rounded-2xl border-2 border-dashed cursor-pointer transition-all duration-200 overflow-hidden",
+              isReceiptDragActive
+                ? "border-blue-400 bg-blue-500/10 shadow-2xl shadow-blue-500/20 scale-[1.02]"
+                : "border-white/15 bg-white/[0.03] hover:border-blue-500/50 hover:bg-blue-500/5"
+            )}
+          >
+            <input {...getReceiptInputProps()} />
+
+            {/* colour bar */}
+            <div className="h-1 w-full bg-gradient-to-r from-blue-500 to-cyan-400" />
+
+            <div className="p-8 flex flex-col flex-1">
+              <div className="flex items-start gap-4 mb-6">
+                <div className="w-12 h-12 rounded-xl bg-blue-500/15 flex items-center justify-center shrink-0">
+                  <Receipt className="w-6 h-6 text-blue-400" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-white mb-1">Receipts</h2>
+                  <p className="text-sm text-gray-400 leading-relaxed">
+                    Auto-number your receipt template from any range. Supports multi-per-page layouts (2, 4, 6 per sheet).
+                  </p>
+                </div>
+              </div>
+
+              <ul className="space-y-2 mb-8">
+                {['Sequential numbering with custom prefix & year', 'Multi-leaflet layouts (2–6 per page)', 'Black & white conversion', 'Custom padding & separator format'].map(f => (
+                  <li key={f} className="flex items-center gap-2 text-xs text-gray-400">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                    {f}
+                  </li>
+                ))}
+              </ul>
+
+              <div className={cn(
+                "mt-auto flex items-center justify-center gap-2 py-3 px-4 rounded-xl border text-sm font-medium transition-all",
+                isReceiptDragActive
+                  ? "bg-blue-500 border-blue-400 text-white"
+                  : "bg-white/5 border-white/10 text-gray-300 group-hover:bg-blue-500/10 group-hover:border-blue-500/40 group-hover:text-blue-300"
+              )}>
+                <FileUp className="w-4 h-4" />
+                {isReceiptDragActive ? 'Drop template here…' : 'Upload Receipt Template'}
+                <ChevronRight className="w-4 h-4 ml-auto opacity-50" />
+              </div>
+            </div>
           </div>
-          <h2 className="text-2xl font-semibold mb-3">{isDragActive ? 'Drop your template here' : 'Upload your template'}</h2>
-          <p className="text-gray-400 mb-6">Drag and drop a PDF, PNG, or JPG file, or click to browse</p>
-          <div className="flex gap-3">
-            <span className="px-4 py-2 rounded-xl bg-white/10 text-sm font-medium">PDF</span>
-            <span className="px-4 py-2 rounded-xl bg-white/10 text-sm font-medium">PNG</span>
-            <span className="px-4 py-2 rounded-xl bg-white/10 text-sm font-medium">JPG</span>
+
+          {/* ── REPORT CARDS / CERTIFICATES ── */}
+          <div
+            {...getCertRootProps()}
+            className={cn(
+              "relative group flex flex-col rounded-2xl border-2 border-dashed cursor-pointer transition-all duration-200 overflow-hidden",
+              isCertDragActive
+                ? "border-purple-400 bg-purple-500/10 shadow-2xl shadow-purple-500/20 scale-[1.02]"
+                : "border-white/15 bg-white/[0.03] hover:border-purple-500/50 hover:bg-purple-500/5"
+            )}
+          >
+            <input {...getCertInputProps()} />
+
+            {/* colour bar */}
+            <div className="h-1 w-full bg-gradient-to-r from-purple-500 to-pink-400" />
+
+            <div className="p-8 flex flex-col flex-1">
+              <div className="flex items-start gap-4 mb-6">
+                <div className="w-12 h-12 rounded-xl bg-purple-500/15 flex items-center justify-center shrink-0">
+                  <GraduationCap className="w-6 h-6 text-purple-400" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-white mb-1">Report Cards &amp; Certificates</h2>
+                  <p className="text-sm text-gray-400 leading-relaxed">
+                    Merge CSV data into your template — one page per student/recipient. Supports photos from a ZIP.
+                  </p>
+                </div>
+              </div>
+
+              <ul className="space-y-2 mb-8">
+                {['CSV data merge (names, scores, remarks)', 'Photo fields from ZIP archive', 'One page generated per CSV row', 'Map any CSV column to any field'].map(f => (
+                  <li key={f} className="flex items-center gap-2 text-xs text-gray-400">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                    {f}
+                  </li>
+                ))}
+              </ul>
+
+              <div className={cn(
+                "mt-auto flex items-center justify-center gap-2 py-3 px-4 rounded-xl border text-sm font-medium transition-all",
+                isCertDragActive
+                  ? "bg-purple-500 border-purple-400 text-white"
+                  : "bg-white/5 border-white/10 text-gray-300 group-hover:bg-purple-500/10 group-hover:border-purple-500/40 group-hover:text-purple-300"
+              )}>
+                <FileUp className="w-4 h-4" />
+                {isCertDragActive ? 'Drop template here…' : 'Upload Report Card Template'}
+                <ChevronRight className="w-4 h-4 ml-auto opacity-50" />
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="flex gap-8 mt-16 text-center">
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-blue-500/20 flex items-center justify-center"><Hash className="w-6 h-6 text-blue-400" /></div>
-            <span className="text-sm text-gray-400">Auto Numbering</span>
-          </div>
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-purple-500/20 flex items-center justify-center"><Database className="w-6 h-6 text-purple-400" /></div>
-            <span className="text-sm text-gray-400">CSV Import</span>
-          </div>
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-emerald-500/20 flex items-center justify-center"><Layout className="w-6 h-6 text-emerald-400" /></div>
-            <span className="text-sm text-gray-400">Multi-Layout</span>
-          </div>
-        </div>
+        {/* Footer hint */}
+        <p className="mt-10 text-xs text-gray-600">
+          Accepts PDF, PNG, JPG — your template stays unchanged; fields are overlaid on top.
+        </p>
       </div>
     );
   }
@@ -1763,8 +1874,13 @@ export default function App() {
         <div className="h-14 border-b border-white/10 flex items-center justify-between px-4 shrink-0">
           <div className="flex items-center gap-3">
             <button onClick={() => setView('landing')} className="p-2 hover:bg-white/10 rounded-lg"><ArrowLeft className="w-4 h-4 text-gray-400" /></button>
-            <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center"><FileText className="w-4 h-4 text-blue-400" /></div>
-            <span className="text-sm font-medium text-gray-200">Design Studio</span>
+            <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center", bulkType === 'receipts' ? "bg-blue-500/20" : "bg-purple-500/20")}>
+              {bulkType === 'receipts' ? <Receipt className="w-4 h-4 text-blue-400" /> : <GraduationCap className="w-4 h-4 text-purple-400" />}
+            </div>
+            <div className="flex flex-col">
+              <span className="text-sm font-medium text-gray-200">Design Studio</span>
+              <span className="text-[10px] text-gray-500">{bulkType === 'receipts' ? 'Receipts' : 'Report Cards / Certificates'}</span>
+            </div>
           </div>
           <div className="flex items-center gap-1">
             <button onClick={() => undo()} className="p-2 hover:bg-white/10 rounded-lg"><Undo className="w-4 h-4 text-gray-400" /></button>
@@ -1805,7 +1921,7 @@ export default function App() {
                 <MousePointer2 className={cn("w-4 h-4", interactionMode === 'place_point' && "animate-pulse")} />
                 {interactionMode === 'place_point' ? 'Click to Deactivate' : 'Place Merge Point (P1, P2...)'}
               </button>
-              {(bulkType === 'certificates' || bulkType === 'idcards') && (
+              {(bulkType === 'certificates') && (
                 <button 
                   onClick={() => {
                     setInteractionMode('select');
@@ -1913,23 +2029,169 @@ export default function App() {
                     </div>
                   </div>
                 )}
-                {(bulkType === 'certificates' || bulkType === 'idcards') && (
-                  <div className="space-y-3">
-                    <h3 className="text-xs font-semibold text-gray-300 flex items-center gap-2"><Database className="w-3 h-3 text-blue-400" /> CSV Data</h3>
-                    {csvData.length === 0 ? (
-                      <div className="relative">
-                        <input type="file" accept=".csv,.zip" onChange={handleDataUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                        <div className="flex items-center justify-center gap-2 py-3 px-4 bg-white/5 border border-white/10 border-dashed rounded-lg text-sm">
-                          <Upload className="w-4 h-4 text-gray-400" />
-                          <span className="text-gray-300">Upload CSV or ZIP</span>
+                {bulkType === 'certificates' && (
+                  <div className="space-y-4">
+                    {/* ── Step 1: Upload CSV / ZIP ── */}
+                    <div className="space-y-2">
+                      <h3 className="text-xs font-semibold text-gray-300 flex items-center gap-2">
+                        <span className="w-4 h-4 rounded-full bg-purple-500/30 text-purple-300 text-[9px] flex items-center justify-center font-bold">1</span>
+                        Upload Data File
+                      </h3>
+                      {csvData.length === 0 ? (
+                        <label className="block cursor-pointer">
+                          <input type="file" accept=".csv,.zip" onChange={handleDataUpload} className="hidden" />
+                          <div className="flex flex-col items-center gap-2 py-5 px-4 bg-white/5 border-2 border-dashed border-white/10 rounded-xl hover:border-purple-500/40 hover:bg-purple-500/5 transition-all text-center">
+                            <Upload className="w-6 h-6 text-gray-400" />
+                            <div>
+                              <p className="text-sm text-gray-300 font-medium">Upload CSV or ZIP</p>
+                              <p className="text-[10px] text-gray-500 mt-0.5">CSV for data · ZIP for data + photos</p>
+                            </div>
+                          </div>
+                        </label>
+                      ) : (
+                        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2.5 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Database className="w-4 h-4 text-emerald-400" />
+                            <div>
+                              <p className="text-xs font-medium text-emerald-300">{csvData.length} records loaded</p>
+                              <p className="text-[10px] text-gray-500">{csvHeaders.length} columns: {csvHeaders.slice(0, 3).join(', ')}{csvHeaders.length > 3 ? '…' : ''}</p>
+                            </div>
+                          </div>
+                          <button onClick={() => setCsvData([], [])} className="text-[10px] text-red-400 hover:text-red-300 px-2 py-1 rounded hover:bg-red-500/10 transition-all">Clear</button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ── Step 2: Place fields on canvas ── */}
+                    <div className="space-y-2">
+                      <h3 className="text-xs font-semibold text-gray-300 flex items-center gap-2">
+                        <span className="w-4 h-4 rounded-full bg-purple-500/30 text-purple-300 text-[9px] flex items-center justify-center font-bold">2</span>
+                        Place Fields on Template
+                      </h3>
+                      <p className="text-[10px] text-gray-500 leading-relaxed">
+                        Use <span className="text-amber-400">Place Merge Point</span> above to click where each value should appear. Then map each field to a CSV column below.
+                      </p>
+                    </div>
+
+                    {/* ── Step 3: Map fields → CSV columns ── */}
+                    {fields.length > 0 && csvHeaders.length > 0 && (
+                      <div className="space-y-2">
+                        <h3 className="text-xs font-semibold text-gray-300 flex items-center gap-2">
+                          <span className="w-4 h-4 rounded-full bg-purple-500/30 text-purple-300 text-[9px] flex items-center justify-center font-bold">3</span>
+                          Map Fields → CSV Columns
+                        </h3>
+                        <div className="space-y-1.5">
+                          {fields.map((field) => (
+                            <div key={field.id} className="flex items-center gap-2 bg-white/5 rounded-lg px-2 py-1.5">
+                              <div className={cn(
+                                "w-2 h-2 rounded-full shrink-0",
+                                field.type === 'number' ? "bg-blue-400" : field.type === 'image' ? "bg-emerald-400" : "bg-purple-400"
+                              )} />
+                              <span className="text-[11px] text-gray-300 font-medium w-16 shrink-0 truncate">{field.label}</span>
+                              <select
+                                value={field.dataKey || ''}
+                                onChange={(e) => updateField(field.id, { dataKey: e.target.value || undefined })}
+                                className="flex-1 bg-black/40 border border-white/10 rounded px-1.5 py-1 text-[11px] text-gray-200 min-w-0"
+                              >
+                                <option value="">— not mapped —</option>
+                                {csvHeaders.map((h) => (
+                                  <option key={h} value={h}>{h}</option>
+                                ))}
+                              </select>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Mapping summary */}
+                        <div className="flex items-center justify-between text-[10px] pt-1">
+                          <span className="text-gray-500">
+                            {fields.filter(f => f.dataKey).length}/{fields.length} fields mapped
+                          </span>
+                          {fields.filter(f => f.dataKey).length === fields.length && fields.length > 0 && (
+                            <span className="text-emerald-400 flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3" /> Ready
+                            </span>
+                          )}
                         </div>
                       </div>
-                    ) : (
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-emerald-400">✓ {csvData.length} records</span>
-                        <button onClick={() => setCsvData([], [])} className="text-xs text-red-400">Clear</button>
+                    )}
+
+                    {/* Placeholder when no fields yet */}
+                    {fields.length === 0 && (
+                      <div className="bg-white/[0.03] border border-white/10 rounded-xl px-3 py-4 text-center">
+                        <p className="text-[11px] text-gray-500">No fields placed yet.<br/>Use "Place Merge Point" to add fields.</p>
                       </div>
                     )}
+
+                    {/* Preview row selector */}
+                    {csvData.length > 0 && (
+                      <div className="space-y-1.5 pt-2 border-t border-white/10">
+                        <h3 className="text-xs font-semibold text-gray-300 flex items-center gap-2">
+                          <span className="w-4 h-4 rounded-full bg-purple-500/30 text-purple-300 text-[9px] flex items-center justify-center font-bold">4</span>
+                          Preview Row
+                        </h3>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => store.setCurrentPage(Math.max(1, store.currentPage - 1))}
+                            className="px-2 py-1 bg-white/5 border border-white/10 rounded text-xs hover:bg-white/10 disabled:opacity-30"
+                            disabled={store.currentPage <= 1}
+                          >‹</button>
+                          <span className="flex-1 text-center text-xs text-gray-300">
+                            Row {store.currentPage} of {csvData.length}
+                          </span>
+                          <button
+                            onClick={() => store.setCurrentPage(Math.min(csvData.length, store.currentPage + 1))}
+                            className="px-2 py-1 bg-white/5 border border-white/10 rounded text-xs hover:bg-white/10 disabled:opacity-30"
+                            disabled={store.currentPage >= csvData.length}
+                          >›</button>
+                        </div>
+                        {/* Show current row data */}
+                        <div className="bg-black/30 rounded-lg p-2 space-y-1 max-h-28 overflow-y-auto">
+                          {csvHeaders.slice(0, 6).map((h) => (
+                            <div key={h} className="flex gap-2 text-[10px]">
+                              <span className="text-gray-500 w-20 shrink-0 truncate">{h}:</span>
+                              <span className="text-gray-300 truncate">{csvData[store.currentPage - 1]?.[h] ?? '—'}</span>
+                            </div>
+                          ))}
+                          {csvHeaders.length > 6 && <p className="text-[9px] text-gray-600">+{csvHeaders.length - 6} more columns…</p>}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Pages to Generate (certificates) */}
+                    <div className="space-y-1.5 pt-2 border-t border-white/10">
+                      <h3 className="text-xs font-semibold text-gray-300 flex items-center gap-2">
+                        <span className="w-4 h-4 rounded-full bg-purple-500/30 text-purple-300 text-[9px] flex items-center justify-center font-bold">5</span>
+                        Pages to Generate
+                      </h3>
+                      <p className="text-[10px] text-gray-500">
+                        Default: all {csvData.length || '—'} rows. Limit to generate a subset.
+                      </p>
+                      <div className="flex gap-2 items-center">
+                        <input
+                          type="number"
+                          min="1"
+                          max={csvData.length || undefined}
+                          placeholder={`All (${csvData.length || '—'})`}
+                          value={pagesToGenerate || ''}
+                          onChange={(e) => setPagesToGenerate(e.target.value === '' ? null : Math.max(1, parseInt(e.target.value) || 1))}
+                          className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-gray-200 placeholder:text-gray-600"
+                        />
+                        {pagesToGenerate && (
+                          <button
+                            onClick={() => setPagesToGenerate(null)}
+                            className="px-2 py-1.5 bg-white/5 border border-white/10 rounded-lg text-[10px] text-gray-400 hover:text-white hover:bg-white/10 transition-all whitespace-nowrap"
+                          >
+                            All
+                          </button>
+                        )}
+                      </div>
+                      {pagesToGenerate && csvData.length > 0 && (
+                        <p className="text-[10px] text-purple-400">
+                          Will generate rows 1–{Math.min(pagesToGenerate, csvData.length)} of {csvData.length}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -2103,6 +2365,22 @@ export default function App() {
                     </button>
                   </div>
                 </div>
+
+                {/* Binding Margin */}
+                {leafletsPerPage > 1 && (
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-medium text-gray-400">Binding Margin (left, pt)</h4>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range" min={0} max={72} step={1}
+                        value={bindingMargin}
+                        onChange={e => setBindingMargin(Number(e.target.value))}
+                        className="flex-1 accent-blue-500"
+                      />
+                      <span className="text-xs text-gray-300 w-8 text-right">{bindingMargin}</span>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -2124,50 +2402,94 @@ export default function App() {
       </div>
 
       {/* Center - Template Canvas */}
-      <div className="flex-1 flex flex-col bg-[#2a2a2a]">
+      <div className="flex-1 min-w-0 flex flex-col bg-[#2a2a2a]">
         <div className="h-14 bg-[#1a1a1a] border-b border-white/10 flex items-center justify-between px-4">
           <span className="text-sm font-medium text-gray-300">Template Canvas</span>
-          <span className="text-xs text-gray-500">{fields.length} fields placed</span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500">{fields.length} fields</span>
+            <div className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-lg px-1 py-0.5">
+              <button
+                onClick={() => setZoomLevel(Math.max(0.5, zoomLevel - 0.25))}
+                className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 rounded transition-all text-sm font-bold"
+                title="Zoom out (−)"
+              >−</button>
+              <button
+                onClick={() => setZoomLevel(1)}
+                className="min-w-[46px] text-center text-xs font-mono text-gray-300 hover:text-white hover:bg-white/10 rounded px-1 py-0.5 transition-all"
+                title="Reset zoom"
+              >{Math.round(zoomLevel * 100)}%</button>
+              <button
+                onClick={() => setZoomLevel(Math.min(3, zoomLevel + 0.25))}
+                className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 rounded transition-all text-sm font-bold"
+                title="Zoom in (+)"
+              >+</button>
+            </div>
+          </div>
         </div>
-        <div className="flex-1 p-6 overflow-auto flex items-center justify-center">
-          <TemplateCanvas
-            templateUrl={templateUrl}
-            templateFile={templateFile}
-            fields={fields}
-            selectedFieldId={selectedFieldId}
-            setSelectedFieldId={setSelectedFieldId}
-            selectedFieldIds={selectedFieldIds}
-            toggleFieldSelection={toggleFieldSelection}
-            interactionMode={interactionMode}
-            setInteractionMode={setInteractionMode}
-            onAddField={handleAddField}
-            updateField={updateField}
-            updateMultipleFields={updateMultipleFields}
-            removeField={removeField}
-            templateBlackAndWhite={templateBlackAndWhite}
-            fromNumber={fromNumber}
-            zeroPadding={zeroPadding}
-            numberingPrefix={numberingPrefix}
-            numberingYear={numberingYear}
-            numberingSeparator={numberingSeparator}
-            leafletsPerPage={leafletsPerPage}
-            columns={columns}
-            rows={rows}
-            orientation={orientation}
-            bulkType={bulkType}
-            snapToGrid={snapToGrid}
-            gridSize={gridSize}
-            zoomLevel={zoomLevel}
-            setZoomLevel={setZoomLevel}
-            showCoordinates={showCoordinates}
-            showGrid={showGrid}
-            canvasDimensions={canvasDimensions}
-          />
+        <div
+          className="flex-1 overflow-hidden"
+          ref={canvasScrollRef}
+          style={{ cursor: isSpacePanning ? 'grabbing' : spaceDown ? 'grab' : undefined }}
+          onMouseDown={(e) => {
+            if (!spaceDown) return;
+            e.preventDefault();
+            const el = canvasScrollRef.current!;
+            setIsSpacePanning(true);
+            canvasPanStart.current = { mx: e.clientX, my: e.clientY, sl: el.scrollLeft, st: el.scrollTop };
+          }}
+          onMouseMove={(e) => {
+            if (!isSpacePanning || !canvasPanStart.current) return;
+            const el = canvasScrollRef.current!;
+            el.scrollLeft = canvasPanStart.current.sl - (e.clientX - canvasPanStart.current.mx);
+            el.scrollTop  = canvasPanStart.current.st - (e.clientY - canvasPanStart.current.my);
+          }}
+          onMouseUp={() => { setIsSpacePanning(false); canvasPanStart.current = null; }}
+          onMouseLeave={() => { setIsSpacePanning(false); canvasPanStart.current = null; }}
+        >
+          <div
+            style={{
+              width:  (() => { const bw = orientation === 'landscape' ? 842 : 595; const cols = leafletsPerPage > 1 ? (columns || 2) : 1; const cw = leafletsPerPage > 1 ? Math.floor((bw * cols - bindingMargin) / cols) : bw; return (cw * cols + (leafletsPerPage > 1 ? bindingMargin : 0)) * zoomLevel + 1200; })(),
+              height: Math.max(842, (orientation === 'landscape' ? 595 : 842) * (leafletsPerPage > 1 ? (rows || 3) : 1)) * zoomLevel + 1200,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <TemplateCanvas
+              templateUrl={templateUrl}
+              templateFile={templateFile}
+              fields={fields}
+              selectedFieldIds={selectedFieldIds}
+              toggleFieldSelection={toggleFieldSelection}
+              interactionMode={interactionMode}
+              onAddField={handleAddField}
+              updateField={updateField}
+              removeField={removeField}
+              templateBlackAndWhite={templateBlackAndWhite}
+              fromNumber={fromNumber}
+              zeroPadding={zeroPadding}
+              numberingPrefix={numberingPrefix}
+              numberingYear={numberingYear}
+              numberingSeparator={numberingSeparator}
+              leafletsPerPage={leafletsPerPage}
+              columns={columns}
+              rows={rows}
+              orientation={orientation}
+              bindingMargin={bindingMargin}
+              bulkType={bulkType}
+              snapToGrid={snapToGrid}
+              gridSize={gridSize}
+              zoomLevel={zoomLevel}
+              setZoomLevel={setZoomLevel}
+              showGrid={showGrid}
+              isSpacePanning={spaceDown || isSpacePanning}
+            />
+          </div>
         </div>
       </div>
 
       {/* Right Panel - PDF Preview */}
-      <div className="w-[400px] flex flex-col bg-[#f5f5f5] border-l border-gray-200">
+      <div className="w-[400px] shrink-0 flex flex-col bg-[#f5f5f5] border-l border-gray-200">
         <div className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-gray-700">{generatedPdfUrl ? 'Generated' : 'Preview'}</span>

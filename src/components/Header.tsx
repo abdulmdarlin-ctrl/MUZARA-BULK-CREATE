@@ -1,11 +1,7 @@
-import React, { useState } from 'react';
 import { useStore } from '../store';
-import { 
-  Printer, PanelLeftOpen, PanelRightOpen, X, 
-  Undo2, Redo2, Zap
-} from 'lucide-react';
+import { Printer, PanelLeftOpen, PanelRightOpen, X, Undo2, Redo2 } from 'lucide-react';
 import { clsx } from 'clsx';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 
 interface HeaderProps {
   onToggleLeft: () => void;
@@ -20,8 +16,7 @@ export function Header({ onToggleLeft, onToggleRight, leftPanelOpen, rightPanelO
 
   const NAV_ITEMS = [
     { id: 'receipts', label: 'RECEIPT BOOKS' },
-    { id: 'certificates', label: 'CERTIFICATES' },
-    { id: 'idcards', label: 'ID CARDS' },
+    { id: 'certificates', label: 'REPORT CARDS / CERTIFICATES' },
   ];
 
   return (
