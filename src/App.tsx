@@ -1544,7 +1544,7 @@ export default function App() {
       let maxPages = pagesToGenerate;
       if (!maxPages && shouldLoopReceipts) {
         const totalReceipts = toNumber - fromNumber + 1;
-        const leafletsPerSheet = isMultiLeaflet ? leafletsPerPage : 1;
+        const leafletsPerSheet = isMultiLeaflet ? leafletsPerPage : Math.max(1, numberFields.length);
         maxPages = Math.ceil(totalReceipts / leafletsPerSheet);
       } else if (!maxPages && shouldLoopCertificates) {
         maxPages = csvData.length;
@@ -1726,13 +1726,13 @@ export default function App() {
 
           const { width: pageW, height: pageH } = page.getSize();
 
-          if (currentNumber > toNumber) { /* skip */ } else {
-            const text = `${numberingPrefix}${numberingSeparator}${numberingYear}${numberingSeparator}${String(currentNumber).padStart(zeroPadding, '0')}`;
-            for (const field of numberFields) {
-              drawTextField(page, field, text, pageW, pageH, 0, 0);
-            }
+          for (let fi = 0; fi < numberFields.length; fi++) {
+            const num = currentNumber + fi;
+            if (num > toNumber) break;
+            const text = `${numberingPrefix}${numberingSeparator}${numberingYear}${numberingSeparator}${String(num).padStart(zeroPadding, '0')}`;
+            drawTextField(page, numberFields[fi], text, pageW, pageH, 0, 0);
           }
-          currentNumber += 1;
+          currentNumber += numberFields.length;
         }
       }
 
