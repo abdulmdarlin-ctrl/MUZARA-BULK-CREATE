@@ -20,6 +20,13 @@ export interface FieldConfig {
   align: 'left' | 'center' | 'right';
   value?: string; // For static text or default value
   dataKey?: string; // Key from CSV
+  zoneId?: string; // Named template slot for photo injection (e.g. "headshot")
+}
+
+export interface PhotoError {
+  row: number;
+  name: string;
+  reason: string;
 }
 
 export interface AppState {
@@ -64,6 +71,11 @@ export interface AppState {
   // Extracted Images from ZIP
   extractedImages: Record<string, ArrayBuffer>;
   setExtractedImages: (images: Record<string, ArrayBuffer>) => void;
+
+  // Photo Error Tracking
+  photoErrors: PhotoError[];
+  addPhotoErrors: (errors: PhotoError[]) => void;
+  clearPhotoErrors: () => void;
 
   // Canvas Dimensions (for accurate PDF coordinate mapping)
   canvasDimensions: { width: number; height: number };
@@ -196,6 +208,11 @@ export const useStore = create<AppState>()(
       // Extracted Images from ZIP
       extractedImages: {},
       setExtractedImages: (images) => set({ extractedImages: images }),
+
+      // Photo Error Tracking
+      photoErrors: [],
+      addPhotoErrors: (errors) => set((state) => ({ photoErrors: [...state.photoErrors, ...errors] })),
+      clearPhotoErrors: () => set({ photoErrors: [] }),
       
       // Canvas Dimensions
       canvasDimensions: { width: 500, height: 700 },

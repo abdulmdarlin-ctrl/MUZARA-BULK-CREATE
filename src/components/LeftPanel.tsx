@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import JSZip from 'jszip';
-import { useStore, FieldConfig } from '../store';
+import { useStore, FieldConfig, PhotoError } from '../store';
 import { FileUp, FileText, Award, IdCard, Plus, Hash, Image as ImageIcon, MousePointer2, Upload, Database, Layout, Zap, Download, Trash2, Undo2, Redo2, Type, AlignLeft, AlignCenter, AlignRight, Bold, Minus } from 'lucide-react';
 import { clsx } from 'clsx';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import { LoadingSpinner, Skeleton } from './LoadingScreen';
+import { resolveAllPhotos, buildErrorsCsv, autoMatchPhotosAsync, ResolvedPhoto } from '../utils/photoResolver';
 
 export function LeftPanel() {
   // TabButton component
@@ -69,6 +70,7 @@ export function LeftPanel() {
     pointCounter, setPointCounter,
     templateBlackAndWhite, setTemplateBlackAndWhite,
     pagesToGenerate, setPagesToGenerate,
+    photoErrors, addPhotoErrors, clearPhotoErrors,
     onMount
   } = useStore();
   
@@ -163,7 +165,7 @@ export function LeftPanel() {
     }
   };
 
-  const handleAddField = (type: 'text' | 'number' | 'image') => {
+  const handleAddField = (type: 'text' | 'number' | 'image', zoneId?: string) => {
     // Ensure we are in select mode so user can interact with new field
     if (interactionMode !== 'select') {
       setInteractionMode('select');
@@ -172,7 +174,7 @@ export function LeftPanel() {
     const newField: FieldConfig = {
       id: `field-${Date.now()}`,
       type,
-      label: type === 'number' ? `P${pointCounter}` : type === 'image' ? 'Photo' : 'Text',
+      label: type === 'number' ? `P${pointCounter}` : type === 'image' ? (zoneId || 'Photo') : 'Text',
       x: 50,
       y: 50,
       fontSize: 16,
@@ -181,9 +183,10 @@ export function LeftPanel() {
       bold: false,
       align: 'left',
       value: type === 'number' ? `P${pointCounter}` : 'Sample Text',
-      dataKey: type === 'number' ? `P${pointCounter}` : undefined,
-      width: type === 'image' ? 100 : undefined,
-      height: type === 'image' ? 100 : undefined,
+      dataKey: type === 'number' ? `P${pointCounter}` : (zoneId || undefined),
+      width: type === 'image' ? 120 : undefined,
+      height: type === 'image' ? 140 : undefined,
+      zoneId: type === 'image' ? (zoneId || 'default') : undefined,
     };
     
     addField(newField);
@@ -228,12 +231,14 @@ export function LeftPanel() {
           csvContent = await zipEntry.async('text');
         }
         
-        // Find image files
+        // Find image files — store with multiple key formats for flexible matching
         if (/\.(jpg|jpeg|png|gif|webp)$/i.test(path)) {
           const fileName = path.split('/').pop()?.toLowerCase() || '';
           const imageData = await zipEntry.async('arraybuffer');
           images[fileName] = imageData;
-          images[path.toLowerCase()] = imageData; // Also store with full path
+          images[path.toLowerCase()] = imageData; // Full path for photo_path matching
+          // Also store without extension for fuzzy matching
+          images[fileName.replace(/\.[^/.]+$/, '')] = imageData;
         }
       }
       
@@ -341,23 +346,61 @@ export function LeftPanel() {
         });
       }
       
-      // Add photo field if found
+      // Add photo field if found — detect zone_id from CSV headers
       if (photoHeader) {
+        // Detect zone from CSV (photo_zone_id column) or default to 'headshot'
+        const zoneId = headers.find(h => h.toLowerCase() === 'photo_zone_id')
+          ? data[0]?.photo_zone_id || 'headshot'
+          : 'headshot';
+        // Detect dimensions from CSV (photo_width, photo_height) or defaults
+        const photoWidth = parseInt(data[0]?.photo_width) || 120;
+        const photoHeight = parseInt(data[0]?.photo_height) || 140;
+        
         addField({
           id: 'field_photo',
           type: 'image',
           label: 'Photo',
           x: 100,
           y: 150,
-          width: 100,
-          height: 120,
+          width: photoWidth,
+          height: photoHeight,
           fontSize: 12,
           fontFamily: 'Helvetica',
           color: '#000000',
           bold: false,
           align: 'left',
           value: data[0]?.[photoHeader] || '',
-          dataKey: photoHeader
+          dataKey: photoHeader,
+          zoneId: zoneId,
+        });
+      }
+      
+      // Detect additional photo zones from suffixed columns (photo_url_1, photo_zone_id_1, …)
+      const photoSuffixes = new Set<string>();
+      for (const h of headers) {
+        const match = h.match(/^photo_(?:url|path|b64|zone_id|width|height|align)_(\d+)$/);
+        if (match) photoSuffixes.add(match[1]);
+      }
+      for (const suffix of photoSuffixes) {
+        const zoneId = data[0]?.[`photo_zone_id_${suffix}`] || `zone_${suffix}`;
+        const photoWidth = parseInt(data[0]?.[`photo_width_${suffix}`]) || 120;
+        const photoHeight = parseInt(data[0]?.[`photo_height_${suffix}`]) || 140;
+        addField({
+          id: `field_photo_${suffix}`,
+          type: 'image',
+          label: `Photo ${suffix}`,
+          x: 100 + parseInt(suffix) * 130,
+          y: 150,
+          width: photoWidth,
+          height: photoHeight,
+          fontSize: 12,
+          fontFamily: 'Helvetica',
+          color: '#000000',
+          bold: false,
+          align: 'left',
+          value: '',
+          dataKey: `photo_${suffix}`,
+          zoneId: zoneId,
         });
       }
     }
@@ -781,41 +824,63 @@ export function LeftPanel() {
             text = csvData[0][field.dataKey] || text;
           }
           
-          if (field.type === 'image' && text) {
-            // Try to get image from extracted images
-            const imageKey = text.split(/[\\/]/).pop()?.toLowerCase() || '';
-            const imageData = extractedImages[imageKey] || extractedImages[text.toLowerCase()];
+          if (field.type === 'image') {
+            // ── Zone-aware photo resolution ──────────────────────────────
+            // Use the photo resolver to get image data from the current CSV row
+            // Supports three strategies: photo_url, photo_path, photo_b64
+            let resolvedPhoto: ResolvedPhoto | null = null;
             
-            console.log('Image field debug:', {
-              fieldId: field.id,
-              fieldX: field.x,
-              fieldY: field.y,
-              fieldWidth: field.width,
-              fieldHeight: field.height,
-              scaleX,
-              scaleY,
-              position,
-              calculatedX: position.x + (field.x * scaleX),
-              calculatedY: pageHeight - position.y - (field.y * scaleY),
-              imageKey,
-              hasImageData: !!imageData
-            });
-            
-            if (imageData) {
+            if (shouldLoopCertificates && currentDataRow) {
+              // Resolve all photos for this row and find the one matching this field's zone
               try {
-                // Embed the image into the PDF
-                const imgType = imageKey.endsWith('.png') ? 'png' : 'jpg';
+                const allPhotos = await resolveAllPhotos(currentDataRow, extractedImages);
+                resolvedPhoto = allPhotos.find(p => p.zoneId === (field.zoneId || 'default')) || allPhotos[0] || null;
+              } catch (err) {
+                console.error('Photo resolution error:', err);
+              }
+            } else if (csvData.length > 0 && csvData[0]) {
+              // Fallback: try resolving from first CSV row
+              try {
+                const allPhotos = await resolveAllPhotos(csvData[0], extractedImages);
+                resolvedPhoto = allPhotos.find(p => p.zoneId === (field.zoneId || 'default')) || allPhotos[0] || null;
+              } catch (err) {
+                console.error('Photo resolution error:', err);
+              }
+            }
+            
+            // Legacy fallback: if resolver didn't find anything, try old extractedImages lookup
+            if (!resolvedPhoto?.data && text) {
+              const imageKey = text.split(/[\\/]/).pop()?.toLowerCase() || '';
+              const legacyData = extractedImages[imageKey] || extractedImages[text.toLowerCase()];
+              if (legacyData) {
+                resolvedPhoto = {
+                  source: 'path',
+                  data: legacyData,
+                  zoneId: field.zoneId || 'default',
+                  width: field.width || 120,
+                  height: field.height || 140,
+                  align: 'center',
+                  mimeType: imageKey.endsWith('.png') ? 'image/png' : 'image/jpeg',
+                };
+              }
+            }
+            
+            if (resolvedPhoto?.data) {
+              try {
+                // Embed the image into the PDF using detected MIME type
+                const isPng = resolvedPhoto.mimeType === 'image/png' || 
+                  (resolvedPhoto.source === 'path' && text?.toLowerCase().endsWith('.png'));
                 let embeddedImage;
                 
-                if (imgType === 'png') {
-                  embeddedImage = await outputPdf.embedPng(imageData);
+                if (isPng) {
+                  embeddedImage = await outputPdf.embedPng(resolvedPhoto.data);
                 } else {
-                  embeddedImage = await outputPdf.embedJpg(imageData);
+                  embeddedImage = await outputPdf.embedJpg(resolvedPhoto.data);
                 }
                 
-                // Calculate dimensions maintaining aspect ratio
-                const imgWidth = (field.width || 100) * scaleX;
-                const imgHeight = (field.height || 120) * scaleY;
+                // Use resolved dimensions (from CSV photo_width/photo_height) or field defaults
+                const imgWidth = (resolvedPhoto.width || field.width || 100) * scaleX;
+                const imgHeight = (resolvedPhoto.height || field.height || 120) * scaleY;
                 
                 let imgX = field.x * scaleX;
                 let imgY = pageHeight - (field.y * scaleY) - imgHeight;
@@ -834,11 +899,25 @@ export function LeftPanel() {
                 });
               } catch (imgError) {
                 console.error('Error embedding image:', imgError);
-                // Fallback to placeholder
+                // Log error for errors.csv
+                if (shouldLoopCertificates && currentDataRow) {
+                  addPhotoErrors([{
+                    row: dataRowIndex,
+                    name: currentDataRow?.name || currentDataRow?.csvname || `Row ${dataRowIndex}`,
+                    reason: `embed_failed: ${imgError}`,
+                  }]);
+                }
                 drawImagePlaceholder(page, position, field, scaleX, scaleY, pageHeight, helvetica, isMultiLeaflet);
               }
             } else {
-              // Draw placeholder if image not found
+              // Draw placeholder if image not found — log error
+              if (resolvedPhoto?.error && shouldLoopCertificates && currentDataRow) {
+                addPhotoErrors([{
+                  row: dataRowIndex,
+                  name: currentDataRow?.name || currentDataRow?.csvname || `Row ${dataRowIndex}`,
+                  reason: resolvedPhoto.error,
+                }]);
+              }
               drawImagePlaceholder(page, position, field, scaleX, scaleY, pageHeight, helvetica, isMultiLeaflet);
             }
             
@@ -955,6 +1034,28 @@ export function LeftPanel() {
       const blob = new Blob([pdfBytes as unknown as ArrayBuffer], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       setGeneratedPdfUrl(url);
+      
+      // ── Photo error reporting ──────────────────────────────────────────
+      const currentErrors = useStore.getState().photoErrors;
+      if (currentErrors.length > 0) {
+        const errorsCsv = buildErrorsCsv(currentErrors);
+        console.warn(`Photo resolution errors (${currentErrors.length} rows):`, errorsCsv);
+        // Offer errors.csv download
+        const errorBlob = new Blob([errorsCsv], { type: 'text/csv' });
+        const errorUrl = URL.createObjectURL(errorBlob);
+        const proceed = confirm(
+          `PDF generated, but ${currentErrors.length} photo(s) could not be resolved.\n` +
+          `Click OK to download errors.csv with details, or Cancel to skip.`
+        );
+        if (proceed) {
+          const a = document.createElement('a');
+          a.href = errorUrl;
+          a.download = 'errors.csv';
+          a.click();
+        }
+        URL.revokeObjectURL(errorUrl);
+        clearPhotoErrors();
+      }
     } catch (error) {
       console.error("Error generating PDF:", error);
       alert("Failed to generate PDF. Check console for details.");
@@ -1125,12 +1226,31 @@ export function LeftPanel() {
               </button>
               
               {(bulkType === 'certificates') && (
-                <button 
-                  onClick={() => handleAddField('image')}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-white/5 hover:bg-white/[0.07] border border-white/10 hover:border-white/20 rounded-xl text-sm text-gray-300 hover:text-white transition-all"
-                >
-                  <ImageIcon className="w-4 h-4" /> Add Photo Field
-                </button>
+                <div className="space-y-2">
+                  <label className="text-[10px] text-gray-500">Photo Zone (e.g. headshot, signature)</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      id="photoZoneInput"
+                      placeholder="headshot"
+                      className="flex-1 bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-xs"
+                      defaultValue="headshot"
+                    />
+                    <button 
+                      onClick={() => {
+                        const input = document.getElementById('photoZoneInput') as HTMLInputElement;
+                        const zoneId = input?.value?.trim() || 'headshot';
+                        handleAddField('image', zoneId);
+                      }}
+                      className="px-4 py-2 bg-white/5 hover:bg-white/[0.07] border border-white/10 hover:border-white/20 rounded-xl text-sm text-gray-300 hover:text-white transition-all"
+                    >
+                      <ImageIcon className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-gray-600">
+                    Zone must match CSV column photo_zone_id
+                  </p>
+                </div>
               )}
             </div>
             <p className="text-xs text-gray-500">
@@ -1352,7 +1472,7 @@ export function LeftPanel() {
                       {csvData.length === 0 ? (
                         <div>
                           <label className="block text-[10px] text-gray-500 mb-2">
-                            Upload CSV or ZIP with columns: name, title, photo
+                            Upload CSV or ZIP with columns: name, title, photo_url, photo_path, photo_b64, photo_zone_id
                           </label>
                           <div className="relative">
                             <input
@@ -1366,6 +1486,9 @@ export function LeftPanel() {
                               <span className="text-gray-300">Click to upload CSV or ZIP</span>
                             </div>
                           </div>
+                          <p className="text-[10px] text-gray-600 mt-1.5">
+                            ZIP: include CSV + photos/ folder · CSV: use photo_url, photo_path, or photo_b64
+                          </p>
                         </div>
                       ) : (
                         <div className="space-y-2">
@@ -1379,15 +1502,54 @@ export function LeftPanel() {
                             </button>
                           </div>
                           
+                          {/* Photo Stats */}
+                          {Object.keys(extractedImages).length > 0 && (
+                            <div className="text-[10px] text-gray-500 flex items-center gap-1">
+                              <ImageIcon className="w-3 h-3" />
+                              {Object.keys(extractedImages).length} image keys indexed
+                            </div>
+                          )}
+                          
                           {/* Field Mapping */}
                           <div className="space-y-2 pt-2 border-t border-white/10">
                             <h4 className="text-[10px] font-medium text-gray-400">Field Mapping</h4>
                             {fields.filter(f => f.type === 'text' || f.type === 'image').map(field => (
                               <div key={field.id} className="flex items-center justify-between text-xs">
-                                <span className="text-gray-300">{field.label}</span>
+                                <span className="text-gray-300">
+                                  {field.label}
+                                  {field.zoneId && <span className="text-blue-400 ml-1">[{field.zoneId}]</span>}
+                                </span>
                                 <span className="text-emerald-400 text-[10px]">→ {field.dataKey}</span>
                               </div>
                             ))}
+                          </div>
+                          
+                          {/* Photo Drag-and-Drop Matcher */}
+                          <div className="space-y-2 pt-2 border-t border-white/10">
+                            <h4 className="text-[10px] font-medium text-gray-400">Photo Matcher</h4>
+                            <div className="relative">
+                              <input
+                                type="file"
+                                accept="image/*"
+                                multiple
+                                onChange={async (e) => {
+                                  const files = Array.from(e.target.files || []);
+                                  if (files.length === 0) return;
+                                  const matched = await autoMatchPhotosAsync(files, csvData);
+                                  if (Object.keys(matched).length > 0) {
+                                    setExtractedImages({ ...extractedImages, ...matched });
+                                    alert(`Auto-matched ${Object.keys(matched).length} photo(s) to CSV rows by name.`);
+                                  } else {
+                                    alert('No photos matched. Ensure filenames match the "name" column in your CSV.');
+                                  }
+                                }}
+                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                              />
+                              <div className="flex items-center justify-center gap-2 py-2 px-3 bg-white/5 hover:bg-white/10 border border-white/10 border-dashed rounded-lg text-[11px] transition-colors">
+                                <ImageIcon className="w-3 h-3 text-purple-400" />
+                                <span className="text-gray-400">Drop photos (auto-match by name)</span>
+                              </div>
+                            </div>
                           </div>
                         </div>
                       )}

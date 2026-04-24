@@ -12,7 +12,8 @@ import {
   Receipt, GraduationCap, ChevronRight, CheckCircle2
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
-import { useStore, FieldConfig } from './store';
+import { useStore, FieldConfig, PhotoError } from './store';
+import { resolveAllPhotos, buildErrorsCsv, autoMatchPhotosAsync, ResolvedPhoto } from './utils/photoResolver';
 import { clsx, type ClassValue } from 'clsx';
 import JSZip from 'jszip';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
@@ -793,11 +794,8 @@ function TemplateCanvas({
                   const fieldX = (field.rx ?? field.x / 595) * CELL_W;
                   const fieldY = (field.ry ?? field.y / 842) * CELL_H;
 
-                  // Number right-to-left within each row
-                  const col = leafletIndex % leafletCols;
-                  const row = Math.floor(leafletIndex / leafletCols);
-                  const rtlIndex = row * leafletCols + (leafletCols - 1 - col);
-                  const leafletNumber = fromNumber + rtlIndex;
+                  // Number left-to-right, top-to-bottom
+                  const leafletNumber = fromNumber + leafletIndex;
                   const isNumberField = field.type === 'number';
                   let displayText = '';
                   if (isNumberField) {
@@ -813,7 +811,7 @@ function TemplateCanvas({
                       key={`${field.id}-${leafletIndex}`}
                       data-field
                       className={cn("absolute select-none transition-shadow", isSelected && "z-20", interactionMode === 'place_point' && "pointer-events-none")}
-                      style={{ left: fieldX, top: fieldY, transform: 'translate(-50%, -50%)' }}
+                      style={{ left: fieldX, top: fieldY, transform: `translateY(-${field.fontSize * 0.8}px)` }}
                       onMouseDown={(e) => handleFieldMouseDown(e, field.id)}
                       onMouseEnter={() => setHoveredField(field.id)}
                       onMouseLeave={() => setHoveredField(null)}
@@ -897,12 +895,12 @@ function TemplateCanvas({
                 isDragging === field.id && "z-30",
                 interactionMode === 'place_point' && "pointer-events-none"
               )}
-              style={{ 
-                left: fieldX, 
+              style={{
+                left: fieldX,
                 top: fieldY,
-                transform: isBeingNudged 
-                  ? `translate(-50%, -50%) translate(${nudgeDirection.x * 2}px, ${nudgeDirection.y * 2}px)` 
-                  : 'translate(-50%, -50%)',
+                transform: isBeingNudged
+                  ? `translateY(-${field.fontSize * 0.8}px) translate(${nudgeDirection.x * 2}px, ${nudgeDirection.y * 2}px)`
+                  : `translateY(-${field.fontSize * 0.8}px)`,
                 transition: isBeingNudged ? 'transform 0.1s ease-out' : undefined
               }}
               onMouseDown={(e) => handleFieldMouseDown(e, field.id)}
@@ -958,7 +956,7 @@ function TemplateCanvas({
                   const isCert = mode === 'certificates';
                   return (
                     <div
-                      className={cn("px-2 py-0.5 whitespace-nowrap", isCert ? "rounded" : "font-bold")}
+                      className={cn("whitespace-nowrap", isCert ? "rounded px-2 py-0.5" : "font-bold")}
                       style={{
                         fontFamily: field.fontFamily || (isCert ? 'Times New Roman' : 'CrashNumberingSerif'),
                         fontWeight: field.bold ? 'bold' : 'normal',
@@ -1060,17 +1058,16 @@ function convertToGrayscale(imageBytes: Uint8Array, mimeType: string): Promise<U
   });
 }
 
-function TabButton({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
+function TabButton({ active, onClick, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
   return (
     <button
       onClick={onClick}
       className={cn(
-        "relative flex items-center gap-2 px-4 py-2.5 rounded-t-lg text-sm font-medium transition-all",
-        active ? "text-white bg-gradient-to-b from-white/10 to-white/5 border-t border-x border-white/20" : "text-gray-400 hover:text-white hover:bg-white/5 border-t border-x border-transparent"
+        "relative flex-1 px-3 py-2 rounded-lg text-xs font-bold transition-all",
+        active ? "bg-blue-500/20 border border-blue-500/30 text-blue-300 shadow-[0_0_12px_rgba(59,130,246,0.15)]" : "text-gray-500 hover:text-gray-300"
       )}
     >
-      {active && <div className="absolute inset-0 bg-gradient-to-b from-blue-500/10 to-purple-500/10 rounded-t-lg" />}
-      <span className="relative z-10">{label}</span>
+      {label}
     </button>
   );
 }
@@ -1083,6 +1080,7 @@ export default function App() {
     fields, addField, removeField, updateField, selectedFieldId, setSelectedFieldId,
     selectedFieldIds, toggleFieldSelection, clearFieldSelection, updateMultipleFields, selectAllNumberFields,
     bulkType, csvData, csvHeaders, setCsvData, extractedImages, setExtractedImages,
+    photoErrors, addPhotoErrors, clearPhotoErrors,
     fromNumber, toNumber, zeroPadding, numberingPrefix, numberingYear, numberingSeparator,
     setNumbering, setCustomNumbering,
     leafletsPerPage, columns, rows, orientation, setLayout, bindingMargin, setBindingMargin,
@@ -1241,7 +1239,10 @@ export default function App() {
           if (path.endsWith('.csv') && !csvContent) csvContent = await zipEntry.async('text');
           if (/\.(jpg|jpeg|png|gif|webp)$/i.test(path)) {
             const fileName = path.split('/').pop()?.toLowerCase() || '';
-            images[fileName] = await zipEntry.async('arraybuffer');
+            const imageData = await zipEntry.async('arraybuffer');
+            images[fileName] = imageData;
+            images[path.toLowerCase()] = imageData; // Full path for photo_path matching
+            images[fileName.replace(/\.[^/.]+$/, '')] = imageData; // Without extension for fuzzy matching
           }
         }
         if (csvContent) {
@@ -1314,7 +1315,7 @@ export default function App() {
     setCsvData(data, headers);
   };
 
-  const handleAddField = (type: 'text' | 'number' | 'image', position?: { x: number; y: number; rx?: number; ry?: number }) => {
+  const handleAddField = (type: 'text' | 'number' | 'image', position?: { x?: number; y?: number; rx?: number; ry?: number; zoneId?: string }) => {
     const A4_WIDTH = 595;
     const A4_HEIGHT = 842;
     
@@ -1327,10 +1328,11 @@ export default function App() {
     const y = position?.y ?? ry * A4_HEIGHT;
     
     const isCertMode = bulkType === 'certificates';
+    const zoneId = position?.zoneId;
     const newField: FieldConfig = {
       id: `field-${Date.now()}`,
       type,
-      label: type === 'number' ? `P${pointCounter}` : type === 'image' ? 'Photo' : 'Text',
+      label: type === 'number' ? `P${pointCounter}` : type === 'image' ? (zoneId || 'Photo') : 'Text',
       x,
       y,
       rx,
@@ -1341,9 +1343,10 @@ export default function App() {
       bold: false,
       align: 'left',
       value: type === 'number' ? `P${pointCounter}` : 'Sample Text',
-      dataKey: undefined, // user maps via the panel
-      width: type === 'image' ? 100 : undefined,
-      height: type === 'image' ? 100 : undefined,
+      dataKey: type === 'image' ? (zoneId || undefined) : undefined,
+      width: type === 'image' ? 120 : undefined,
+      height: type === 'image' ? 140 : undefined,
+      zoneId: type === 'image' ? (zoneId || 'default') : undefined,
     };
     addField(newField);
     if (type === 'number') setPointCounter(pointCounter + 1);
@@ -1563,21 +1566,16 @@ export default function App() {
         if (!safeText) return;
 
         const font = getFont(field);
-        const textWidth = font.widthOfTextAtSize(safeText, field.fontSize);
 
         const hex = (field.color || '#000000').replace('#', '').padEnd(6, '0');
         const r = parseInt(hex.substring(0, 2), 16) / 255;
         const g = parseInt(hex.substring(2, 4), 16) / 255;
         const b = parseInt(hex.substring(4, 6), 16) / 255;
 
-        // Canvas: outer div centered at (cellX, cellY) via translate(-50%,-50%).
-        // Line-height ≈ 1.2 * fontSize. Baseline from top of line box ≈ fontSize * 0.8 (ascender).
-        // Baseline from page top = cellY - (1.2*fontSize)/2 + fontSize*0.8
-        //                        = cellY - fontSize*0.6 + fontSize*0.8
-        //                        = cellY + fontSize * 0.2
-        // PDF y is measured from page bottom:
-        const pdfX = cellX - textWidth / 2 + offsetX;
-        const pdfY = pageH - cellY - field.fontSize * 0.2 + offsetY;
+        // Canvas shifts text up by fontSize*0.8 so baseline lands at click point (cellY from top).
+        // PDF draws from baseline; Y is from page bottom: baseline = pageH - cellY.
+        const pdfX = cellX + offsetX;
+        const pdfY = pageH - cellY + offsetY;  // baseline exactly at click point
 
         page.drawText(safeText, {
           x: Math.max(0, pdfX),
@@ -1621,18 +1619,44 @@ export default function App() {
             const text = csvValue || fallback;
 
             if (field.type === 'image') {
-              // Image fields: look up extracted image by filename stored in CSV cell
-              const filename = csvValue.toLowerCase();
-              const imgBuffer = filename ? extractedImages[filename] : null;
-              if (imgBuffer) {
+              // ── Zone-aware photo resolution ──────────────────────────────
+              let resolvedPhoto: ResolvedPhoto | null = null;
+              
+              // Try photo resolver (supports photo_url, photo_path, photo_b64)
+              try {
+                const allPhotos = await resolveAllPhotos(dataRow, extractedImages);
+                resolvedPhoto = allPhotos.find(p => p.zoneId === (field.zoneId || 'default')) || allPhotos[0] || null;
+              } catch (err) {
+                console.error('Photo resolution error:', err);
+              }
+              
+              // Legacy fallback: direct extractedImages lookup by CSV value
+              if (!resolvedPhoto?.data && csvValue) {
+                const filename = csvValue.toLowerCase();
+                const imgBuffer = filename ? extractedImages[filename] : null;
+                if (imgBuffer) {
+                  resolvedPhoto = {
+                    source: 'path',
+                    data: imgBuffer,
+                    zoneId: field.zoneId || 'default',
+                    width: field.width ?? 120,
+                    height: field.height ?? 140,
+                    align: 'center',
+                    mimeType: filename.endsWith('.png') ? 'image/png' : 'image/jpeg',
+                  };
+                }
+              }
+              
+              if (resolvedPhoto?.data) {
                 try {
                   const fieldX = (field.rx !== undefined ? field.rx : field.x / pageW) * pageW;
                   const fieldY = (field.ry !== undefined ? field.ry : field.y / pageH) * pageH;
-                  const w = field.width ?? 80;
-                  const h = field.height ?? 80;
-                  const embeddedImg = filename.endsWith('.jpg') || filename.endsWith('.jpeg')
-                    ? await outputPdf.embedJpg(new Uint8Array(imgBuffer))
-                    : await outputPdf.embedPng(new Uint8Array(imgBuffer));
+                  const w = resolvedPhoto.width || (field.width ?? 80);
+                  const h = resolvedPhoto.height || (field.height ?? 80);
+                  const isPng = resolvedPhoto.mimeType === 'image/png';
+                  const embeddedImg = isPng
+                    ? await outputPdf.embedPng(new Uint8Array(resolvedPhoto.data))
+                    : await outputPdf.embedJpg(new Uint8Array(resolvedPhoto.data));
                   page.drawImage(embeddedImg, {
                     x: fieldX - w / 2,
                     y: pageH - fieldY - h / 2,
@@ -1640,8 +1664,11 @@ export default function App() {
                     height: h,
                   });
                 } catch (e) {
-                  console.warn(`Could not embed image "${filename}":`, e);
+                  console.warn(`Could not embed image:`, e);
+                  addPhotoErrors([{ row: csvRowIndex, name: dataRow?.name || dataRow?.csvname || `Row ${csvRowIndex}`, reason: `embed_failed: ${e}` }]);
                 }
+              } else if (resolvedPhoto?.error) {
+                addPhotoErrors([{ row: csvRowIndex, name: dataRow?.name || dataRow?.csvname || `Row ${csvRowIndex}`, reason: resolvedPhoto.error }]);
               }
             } else {
               // text and number field types both render text from CSV
@@ -1672,20 +1699,16 @@ export default function App() {
               page.drawImage(templateImage, { x: offsetX, y: offsetY, width: CELL_W, height: CELL_H });
             }
 
-            // Number right-to-left within each row
-            const rtlIndex = row * leafletCols + (leafletCols - 1 - col);
-            const leafletNumber = fromNumber + rtlIndex + pageNum * leafletsPerPage;
+            // Number left-to-right, top-to-bottom
+            const leafletNumber = fromNumber + i + pageNum * leafletsPerPage;
             if (leafletNumber > toNumber) continue;
 
             for (const field of numberFields) {
-              const fieldIndex = numberFields.indexOf(field);
-              const actualNumber = leafletNumber + fieldIndex;
-              if (actualNumber > toNumber) continue;
-              const text = `${numberingPrefix}${numberingSeparator}${numberingYear}${numberingSeparator}${String(actualNumber).padStart(zeroPadding, '0')}`;
+              const text = `${numberingPrefix}${numberingSeparator}${numberingYear}${numberingSeparator}${String(leafletNumber).padStart(zeroPadding, '0')}`;
               drawTextField(page, field, text, CELL_W, CELL_H, offsetX, offsetY);
             }
           }
-          currentNumber += numberFields.length;
+          currentNumber += leafletsPerPage;
 
         // ── RECEIPTS: single per page ────────────────────────────────────────────
         } else {
@@ -1703,14 +1726,13 @@ export default function App() {
 
           const { width: pageW, height: pageH } = page.getSize();
 
-          for (const field of numberFields) {
-            const fieldIndex = numberFields.indexOf(field);
-            const actualNumber = currentNumber + fieldIndex;
-            if (actualNumber > toNumber) break;
-            const text = `${numberingPrefix}${numberingSeparator}${numberingYear}${numberingSeparator}${String(actualNumber).padStart(zeroPadding, '0')}`;
-            drawTextField(page, field, text, pageW, pageH, 0, 0);
+          if (currentNumber > toNumber) { /* skip */ } else {
+            const text = `${numberingPrefix}${numberingSeparator}${numberingYear}${numberingSeparator}${String(currentNumber).padStart(zeroPadding, '0')}`;
+            for (const field of numberFields) {
+              drawTextField(page, field, text, pageW, pageH, 0, 0);
+            }
           }
-          currentNumber += numberFields.length;
+          currentNumber += 1;
         }
       }
 
@@ -1721,6 +1743,27 @@ export default function App() {
       if (prevUrl) URL.revokeObjectURL(prevUrl);
       const url = URL.createObjectURL(blob);
       setGeneratedPdfUrl(url);
+      
+      // ── Photo error reporting ──────────────────────────────────────────
+      const currentErrors = useStore.getState().photoErrors;
+      if (currentErrors.length > 0) {
+        const errorsCsv = buildErrorsCsv(currentErrors);
+        console.warn(`Photo resolution errors (${currentErrors.length} rows):`, errorsCsv);
+        const errorBlob = new Blob([errorsCsv], { type: 'text/csv' });
+        const errorUrl = URL.createObjectURL(errorBlob);
+        const proceed = confirm(
+          `PDF generated, but ${currentErrors.length} photo(s) could not be resolved.\n` +
+          `Click OK to download errors.csv with details, or Cancel to skip.`
+        );
+        if (proceed) {
+          const a = document.createElement('a');
+          a.href = errorUrl;
+          a.download = 'errors.csv';
+          a.click();
+        }
+        URL.revokeObjectURL(errorUrl);
+        clearPhotoErrors();
+      }
     } catch (error) {
       console.error("Error generating PDF:", error);
       alert("Failed to generate PDF.");
@@ -1867,90 +1910,113 @@ export default function App() {
 
   // --- DESIGN STUDIO ---
   return (
-    <div className="h-screen bg-[#1a1a1a] text-white flex overflow-hidden font-sans">
+    <div className="h-screen bg-[#0a0a0a] text-white flex overflow-hidden font-sans">
       {/* Left Sidebar - Tools */}
-      <div className="w-[380px] flex flex-col border-r border-white/10 bg-[#1a1a1a]">
+      <div className="w-[380px] flex flex-col border-r border-white/8 bg-[#111111]">
         {/* Header */}
-        <div className="h-14 border-b border-white/10 flex items-center justify-between px-4 shrink-0">
+        <div className="h-14 border-b border-white/8 flex items-center justify-between px-4 shrink-0 bg-[#111111]">
           <div className="flex items-center gap-3">
-            <button onClick={() => setView('landing')} className="p-2 hover:bg-white/10 rounded-lg"><ArrowLeft className="w-4 h-4 text-gray-400" /></button>
-            <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center", bulkType === 'receipts' ? "bg-blue-500/20" : "bg-purple-500/20")}>
+            <button onClick={() => setView('landing')} className="p-2 hover:bg-white/10 rounded-xl transition-all border border-white/5"><ArrowLeft className="w-4 h-4 text-gray-400" /></button>
+            <div className={cn("w-8 h-8 rounded-xl flex items-center justify-center shadow-lg", bulkType === 'receipts' ? "bg-gradient-to-br from-blue-500/30 to-cyan-500/20 border border-blue-500/20" : "bg-gradient-to-br from-purple-500/30 to-pink-500/20 border border-purple-500/20")}>
               {bulkType === 'receipts' ? <Receipt className="w-4 h-4 text-blue-400" /> : <GraduationCap className="w-4 h-4 text-purple-400" />}
             </div>
             <div className="flex flex-col">
-              <span className="text-sm font-medium text-gray-200">Design Studio</span>
+              <span className="text-sm font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">Design Studio</span>
               <span className="text-[10px] text-gray-500">{bulkType === 'receipts' ? 'Receipts' : 'Report Cards / Certificates'}</span>
             </div>
           </div>
-          <div className="flex items-center gap-1">
-            <button onClick={() => undo()} className="p-2 hover:bg-white/10 rounded-lg"><Undo className="w-4 h-4 text-gray-400" /></button>
-            <button onClick={() => redo()} className="p-2 hover:bg-white/10 rounded-lg"><Redo className="w-4 h-4 text-gray-400" /></button>
+          <div className="flex items-center gap-1 bg-white/5 p-1 rounded-xl border border-white/5">
+            <button onClick={() => undo()} className="p-1.5 hover:bg-white/10 rounded-lg transition-all" title="Undo"><Undo className="w-3.5 h-3.5 text-gray-400" /></button>
+            <div className="w-px h-3 bg-white/10" />
+            <button onClick={() => redo()} className="p-1.5 hover:bg-white/10 rounded-lg transition-all" title="Redo"><Redo className="w-3.5 h-3.5 text-gray-400" /></button>
           </div>
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
           {/* File Info */}
-          <div className="bg-white/5 rounded-xl p-4 border border-white/10">
-            <div className="flex items-center gap-3">
-              <FileText className="w-5 h-5 text-blue-400" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-white truncate">{templateFile?.name}</p>
-                <p className="text-xs text-gray-500">Template loaded</p>
+          <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
+            <div className={cn("h-0.5 w-full", bulkType === 'receipts' ? "bg-gradient-to-r from-blue-500 to-cyan-400" : "bg-gradient-to-r from-purple-500 to-pink-400")} />
+            <div className="p-3 flex items-center gap-3">
+              <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center shrink-0", bulkType === 'receipts' ? "bg-blue-500/15" : "bg-purple-500/15")}>
+                <FileText className={cn("w-4 h-4", bulkType === 'receipts' ? "text-blue-400" : "text-purple-400")} />
               </div>
-              <button onClick={() => setView('landing')} className="text-xs text-blue-400 hover:text-blue-300">Change</button>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-white truncate">{templateFile?.name}</p>
+                <p className="text-[10px] text-gray-500">Template loaded</p>
+              </div>
+              <button onClick={() => setView('landing')} className={cn("text-xs font-medium px-2.5 py-1 rounded-lg border transition-all", bulkType === 'receipts' ? "text-blue-400 border-blue-500/20 bg-blue-500/10 hover:bg-blue-500/20" : "text-purple-400 border-purple-500/20 bg-purple-500/10 hover:bg-purple-500/20")}>Change</button>
             </div>
           </div>
 
           {/* Add Elements */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <MousePointer2 className="w-4 h-4 text-amber-400" />
-              <h2 className="text-sm font-semibold text-white">Add Elements</h2>
+          <div className="space-y-2.5">
+            <div className="flex items-center gap-2 px-0.5">
+              <MousePointer2 className="w-3.5 h-3.5 text-amber-400" />
+              <h2 className="text-xs font-bold text-gray-300 uppercase tracking-wider">Add Elements</h2>
             </div>
             <div className="space-y-2">
-              <button 
+              <button
                 onClick={() => setInteractionMode(interactionMode === 'place_point' ? 'select' : 'place_point')}
                 className={cn(
-                  "w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-sm border transition-all",
-                  interactionMode === 'place_point' 
-                    ? "bg-amber-500/20 border-amber-500/50 text-amber-300 ring-2 ring-amber-500/30" 
-                    : "bg-white/5 border-white/10 text-gray-300 hover:bg-white/10"
+                  "w-full flex items-center gap-2 py-2.5 px-3.5 rounded-xl text-sm border transition-all",
+                  interactionMode === 'place_point'
+                    ? "bg-amber-500/20 border-amber-500/40 text-amber-300 shadow-[0_0_20px_rgba(245,158,11,0.15)]"
+                    : "bg-white/[0.03] border-white/10 text-gray-300 hover:bg-white/[0.06] hover:border-white/20"
                 )}
               >
-                <MousePointer2 className={cn("w-4 h-4", interactionMode === 'place_point' && "animate-pulse")} />
-                {interactionMode === 'place_point' ? 'Click to Deactivate' : 'Place Merge Point (P1, P2...)'}
+                <MousePointer2 className={cn("w-4 h-4 shrink-0", interactionMode === 'place_point' && "animate-pulse")} />
+                <span className="flex-1 text-left">{interactionMode === 'place_point' ? 'Click to Deactivate' : 'Place Merge Point (P1, P2...)'}</span>
               </button>
               {(bulkType === 'certificates') && (
-                <button 
-                  onClick={() => {
-                    setInteractionMode('select');
-                    handleAddField('image');
-                  }} 
-                  className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-white/5 border border-white/10 rounded-xl text-sm text-gray-300 hover:bg-white/10"
-                >
-                  <ImageIcon className="w-4 h-4" /> Add Photo Field
-                </button>
+                <div className="space-y-2">
+                  <label className="text-[10px] text-gray-500 uppercase tracking-wider">Photo Zone</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      id="appPhotoZoneInput"
+                      placeholder="e.g. headshot, signature"
+                      className="flex-1 bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-xs"
+                      defaultValue="headshot"
+                    />
+                    <button
+                      onClick={() => {
+                        setInteractionMode('select');
+                        const input = document.getElementById('appPhotoZoneInput') as HTMLInputElement;
+                        const zoneId = input?.value?.trim() || 'headshot';
+                        handleAddField('image', { zoneId });
+                      }}
+                      className="px-4 py-2 bg-white/[0.03] border border-white/10 hover:bg-white/[0.06] hover:border-white/20 rounded-xl text-sm text-gray-300 hover:text-white transition-all"
+                    >
+                      <ImageIcon className="w-4 h-4 text-purple-400" />
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-gray-600">
+                    Zone must match CSV photo_zone_id column
+                  </p>
+                </div>
               )}
             </div>
           </div>
 
           {/* Template Display */}
           {bulkType === 'receipts' && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <ImageIcon className="w-4 h-4 text-purple-400" />
-                <h2 className="text-sm font-semibold text-white">Template Display</h2>
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-2 px-0.5">
+                <ImageIcon className="w-3.5 h-3.5 text-purple-400" />
+                <h2 className="text-xs font-bold text-gray-300 uppercase tracking-wider">Template Display</h2>
               </div>
               <button
                 onClick={() => setTemplateBlackAndWhite(!templateBlackAndWhite)}
                 className={cn(
-                  "w-full flex items-center justify-between py-2.5 px-3 rounded-xl text-sm border transition-all",
-                  templateBlackAndWhite ? "bg-purple-500/10 border-purple-500/30 text-purple-300" : "bg-white/5 border-white/10 text-gray-300"
+                  "w-full flex items-center justify-between py-2.5 px-3.5 rounded-xl text-sm border transition-all",
+                  templateBlackAndWhite
+                    ? "bg-purple-500/10 border-purple-500/30 text-purple-300 shadow-[0_0_20px_rgba(168,85,247,0.1)]"
+                    : "bg-white/[0.03] border-white/10 text-gray-300 hover:bg-white/[0.06] hover:border-white/20"
                 )}
               >
                 <span className="flex items-center gap-2"><ImageIcon className="w-4 h-4" /> Black & White</span>
-                <span className={cn("px-2 py-0.5 rounded text-[10px]", templateBlackAndWhite ? "bg-purple-500/20" : "bg-white/10")}>
+                <span className={cn("px-2 py-0.5 rounded-md text-[10px] font-bold", templateBlackAndWhite ? "bg-purple-500/20 text-purple-300" : "bg-white/10 text-gray-500")}>
                   {templateBlackAndWhite ? 'ON' : 'OFF'}
                 </span>
               </button>
@@ -1959,28 +2025,26 @@ export default function App() {
 
           {/* Pages to Generate */}
           {bulkType === 'receipts' && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Hash className="w-4 h-4 text-emerald-400" />
-                <h2 className="text-sm font-semibold text-white">Pages to Generate</h2>
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-2 px-0.5">
+                <Hash className="w-3.5 h-3.5 text-emerald-400" />
+                <h2 className="text-xs font-bold text-gray-300 uppercase tracking-wider">Pages to Generate</h2>
               </div>
               <div className="flex gap-2">
                 <input
-                  type="number"
-                  min="1"
-                  placeholder="All"
+                  type="number" min="1" placeholder="All"
                   value={pagesToGenerate || ''}
                   onChange={(e) => setPagesToGenerate(e.target.value === '' ? null : parseInt(e.target.value))}
-                  className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm"
+                  className="flex-1 bg-white/[0.03] border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-blue-500/40 focus:outline-none transition-colors"
                 />
-                <button onClick={() => setPagesToGenerate(null)} className="px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-sm">All</button>
+                <button onClick={() => setPagesToGenerate(null)} className="px-4 py-2 bg-white/[0.03] border border-white/10 rounded-xl text-sm text-gray-400 hover:bg-white/[0.06] hover:text-white transition-all">All</button>
               </div>
             </div>
           )}
 
           {/* Tabs */}
-          <div className="space-y-4 pt-4 border-t border-white/10">
-            <div className="relative flex gap-1 border-b border-white/10 pb-1">
+          <div className="space-y-4 pt-4 border-t border-white/5">
+            <div className="flex gap-1 bg-white/[0.03] border border-white/10 rounded-xl p-1">
               <TabButton active={activeTab === 'data'} onClick={() => setActiveTab('data')} icon={<Database className="w-4 h-4" />} label="Data" />
               <TabButton active={activeTab === 'typography'} onClick={() => setActiveTab('typography')} icon={<Type className="w-4 h-4" />} label="Typography" />
               {bulkType === 'receipts' && <TabButton active={activeTab === 'layout'} onClick={() => setActiveTab('layout')} icon={<Layout className="w-4 h-4" />} label="Layout" />}
@@ -1991,27 +2055,25 @@ export default function App() {
               <div className="space-y-4">
                 {bulkType === 'receipts' && (
                   <div className="space-y-3">
-                    <h3 className="text-xs font-semibold text-gray-300 flex items-center gap-2"><Hash className="w-3 h-3 text-blue-400" /> Numbering</h3>
+                    <h3 className="text-xs font-bold text-gray-300 flex items-center gap-2 uppercase tracking-wider"><Hash className="w-3 h-3 text-blue-400" /> Numbering</h3>
                     <div className="grid grid-cols-3 gap-2">
-                      <div>
-                        <label className="block text-[10px] text-gray-500 mb-1">From</label>
-                        <input type="number" value={fromNumber} onChange={(e) => setNumbering(parseInt(e.target.value) || 1, toNumber, zeroPadding)} className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs" />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] text-gray-500 mb-1">To</label>
-                        <input type="number" value={toNumber} onChange={(e) => setNumbering(fromNumber, parseInt(e.target.value) || 100, zeroPadding)} className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs" />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] text-gray-500 mb-1">Padding</label>
-                        <input type="number" value={zeroPadding} onChange={(e) => setNumbering(fromNumber, toNumber, parseInt(e.target.value) || 3)} className="w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-xs" />
-                      </div>
+                      {[
+                        { label: 'From', value: fromNumber, onChange: (v: number) => setNumbering(v, toNumber, zeroPadding) },
+                        { label: 'To', value: toNumber, onChange: (v: number) => setNumbering(fromNumber, v, zeroPadding) },
+                        { label: 'Padding', value: zeroPadding, onChange: (v: number) => setNumbering(fromNumber, toNumber, v) },
+                      ].map(({ label, value, onChange }) => (
+                        <div key={label}>
+                          <label className="block text-[10px] text-gray-500 mb-1">{label}</label>
+                          <input type="number" value={value} onChange={(e) => onChange(parseInt(e.target.value) || 1)} className="w-full bg-white/[0.03] border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:border-blue-500/40 focus:outline-none transition-colors" />
+                        </div>
+                      ))}
                     </div>
-                    <div className="space-y-2 pt-2 border-t border-white/10">
-                      <h4 className="text-[10px] font-medium text-gray-400">Custom Format</h4>
+                    <div className="space-y-2 pt-2 border-t border-white/5">
+                      <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Custom Format</h4>
                       <div className="grid grid-cols-3 gap-2">
-                        <input type="text" value={numberingPrefix} onChange={(e) => setCustomNumbering(e.target.value, numberingYear, numberingSeparator)} className="bg-black/50 border border-white/10 rounded px-2 py-1 text-xs" placeholder="Prefix" />
-                        <input type="text" value={numberingYear} onChange={(e) => setCustomNumbering(numberingPrefix, e.target.value, numberingSeparator)} className="bg-black/50 border border-white/10 rounded px-2 py-1 text-xs" placeholder="Year" />
-                        <select value={numberingSeparator} onChange={(e) => setCustomNumbering(numberingPrefix, numberingYear, e.target.value)} className="bg-black/50 border border-white/10 rounded px-2 py-1 text-xs">
+                        <input type="text" value={numberingPrefix} onChange={(e) => setCustomNumbering(e.target.value, numberingYear, numberingSeparator)} className="bg-white/[0.03] border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white placeholder:text-gray-600 focus:border-blue-500/40 focus:outline-none transition-colors" placeholder="Prefix" />
+                        <input type="text" value={numberingYear} onChange={(e) => setCustomNumbering(numberingPrefix, e.target.value, numberingSeparator)} className="bg-white/[0.03] border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white placeholder:text-gray-600 focus:border-blue-500/40 focus:outline-none transition-colors" placeholder="Year" />
+                        <select value={numberingSeparator} onChange={(e) => setCustomNumbering(numberingPrefix, numberingYear, e.target.value)} className="bg-white/[0.03] border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:border-blue-500/40 focus:outline-none transition-colors">
                           <option value="">None</option>
                           <option value="/">/</option>
                           <option value="-">-</option>
@@ -2020,9 +2082,9 @@ export default function App() {
                           <option value=" ">Space</option>
                         </select>
                       </div>
-                      <div className="bg-black/30 rounded p-2">
-                        <div className="text-[10px] text-gray-500">Preview:</div>
-                        <div className="text-xs text-blue-400 font-mono">
+                      <div className="bg-white/[0.03] border border-white/5 rounded-xl p-2.5">
+                        <div className="text-[10px] text-gray-600 mb-1">Preview</div>
+                        <div className="text-sm text-blue-400 font-mono font-bold">
                           {numberingPrefix}{numberingSeparator}{numberingYear}{numberingSeparator}{String(fromNumber).padStart(zeroPadding, '0')}
                         </div>
                       </div>
@@ -2251,11 +2313,11 @@ export default function App() {
                     
                     {/* Bulk Typography Controls */}
                     <div>
-                      <label className="block text-[10px] text-gray-500 mb-1.5">Font Family</label>
-                      <select 
-                        value={firstSelectedField?.fontFamily || 'CrashNumberingSerif'} 
-                        onChange={(e) => updateMultipleFields(selectedFieldIds, { fontFamily: e.target.value })} 
-                        className="w-full bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-xs"
+                      <label className="block text-[10px] text-gray-500 mb-1.5 uppercase tracking-wider">Font Family</label>
+                      <select
+                        value={firstSelectedField?.fontFamily || 'CrashNumberingSerif'}
+                        onChange={(e) => updateMultipleFields(selectedFieldIds, { fontFamily: e.target.value })}
+                        className="w-full bg-white/[0.03] border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:border-blue-500/40 focus:outline-none transition-colors"
                       >
                         <option value="CrashNumberingSerif">CrashNumberingSerif</option>
                         <option value="Helvetica">Helvetica</option>
@@ -2264,57 +2326,48 @@ export default function App() {
                         {customFonts.map(font => <option key={font.name} value={font.name}>{font.name}</option>)}
                       </select>
                     </div>
-                    
+
                     <div className="grid grid-cols-3 gap-2">
                       <div className="col-span-2">
-                        <label className="block text-[10px] text-gray-500 mb-1.5">Size</label>
-                        <input 
-                          type="number" 
-                          value={firstSelectedField?.fontSize || 20} 
-                          onChange={(e) => updateMultipleFields(selectedFieldIds, { fontSize: parseInt(e.target.value) || 12 })} 
-                          className="w-full bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-xs" 
+                        <label className="block text-[10px] text-gray-500 mb-1.5 uppercase tracking-wider">Size (pt)</label>
+                        <input
+                          type="number"
+                          value={firstSelectedField?.fontSize || 20}
+                          onChange={(e) => updateMultipleFields(selectedFieldIds, { fontSize: parseInt(e.target.value) || 12 })}
+                          className="w-full bg-white/[0.03] border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:border-blue-500/40 focus:outline-none transition-colors"
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] text-gray-500 mb-1.5">Color</label>
-                        <input 
-                          type="color" 
-                          value={firstSelectedField?.color || '#FF0000'} 
-                          onChange={(e) => updateMultipleFields(selectedFieldIds, { color: e.target.value })} 
-                          className="w-full h-9 bg-black/50 border border-white/10 rounded-lg" 
+                        <label className="block text-[10px] text-gray-500 mb-1.5 uppercase tracking-wider">Color</label>
+                        <input
+                          type="color"
+                          value={firstSelectedField?.color || '#FF0000'}
+                          onChange={(e) => updateMultipleFields(selectedFieldIds, { color: e.target.value })}
+                          className="w-full h-[34px] bg-white/[0.03] border border-white/10 rounded-xl cursor-pointer"
                         />
                       </div>
                     </div>
-                    
+
                     <div>
-                      <label className="block text-[10px] text-gray-500 mb-1.5">Alignment</label>
-                      <div className="grid grid-cols-3 gap-1">
-                        <button 
-                          onClick={() => updateMultipleFields(selectedFieldIds, { align: 'left' })} 
-                          className={cn("py-2 flex items-center justify-center rounded-lg text-xs border", firstSelectedField?.align === 'left' ? "bg-blue-600" : "bg-black/50 border-white/10")}
-                        >
-                          <AlignLeft className="w-3 h-3" />
-                        </button>
-                        <button 
-                          onClick={() => updateMultipleFields(selectedFieldIds, { align: 'center' })} 
-                          className={cn("py-2 flex items-center justify-center rounded-lg text-xs border", firstSelectedField?.align === 'center' ? "bg-blue-600" : "bg-black/50 border-white/10")}
-                        >
-                          <AlignCenter className="w-3 h-3" />
-                        </button>
-                        <button 
-                          onClick={() => updateMultipleFields(selectedFieldIds, { align: 'right' })} 
-                          className={cn("py-2 flex items-center justify-center rounded-lg text-xs border", firstSelectedField?.align === 'right' ? "bg-blue-600" : "bg-black/50 border-white/10")}
-                        >
-                          <AlignRight className="w-3 h-3" />
-                        </button>
+                      <label className="block text-[10px] text-gray-500 mb-1.5 uppercase tracking-wider">Alignment</label>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {([['left', AlignLeft], ['center', AlignCenter], ['right', AlignRight]] as const).map(([align, Icon]) => (
+                          <button
+                            key={align}
+                            onClick={() => updateMultipleFields(selectedFieldIds, { align })}
+                            className={cn("py-2 flex items-center justify-center rounded-xl text-xs border transition-all", firstSelectedField?.align === align ? "bg-blue-500/20 border-blue-500/40 text-blue-300" : "bg-white/[0.03] border-white/10 text-gray-400 hover:bg-white/[0.06]")}
+                          >
+                            <Icon className="w-3.5 h-3.5" />
+                          </button>
+                        ))}
                       </div>
                     </div>
-                    
-                    <button 
-                      onClick={() => updateMultipleFields(selectedFieldIds, { bold: !(firstSelectedField?.bold ?? true) })} 
-                      className={cn("w-full py-2 flex items-center justify-center rounded-lg text-xs border", firstSelectedField?.bold ? "bg-blue-600" : "bg-black/50 border-white/10")}
+
+                    <button
+                      onClick={() => updateMultipleFields(selectedFieldIds, { bold: !(firstSelectedField?.bold ?? true) })}
+                      className={cn("w-full py-2 flex items-center justify-center gap-2 rounded-xl text-xs border transition-all", firstSelectedField?.bold ? "bg-blue-500/20 border-blue-500/40 text-blue-300" : "bg-white/[0.03] border-white/10 text-gray-400 hover:bg-white/[0.06]")}
                     >
-                      <Bold className="w-3 h-3 mr-1" /> {firstSelectedField?.bold ? 'Bold' : 'Regular'}
+                      <Bold className="w-3.5 h-3.5" /> {firstSelectedField?.bold ? 'Bold' : 'Regular'}
                     </button>
                     
                     {hasMultipleSelection && (
@@ -2337,48 +2390,45 @@ export default function App() {
             {/* Layout Tab */}
             {activeTab === 'layout' && bulkType === 'receipts' && (
               <div className="space-y-4">
-                {/* Leaflets Per Page */}
                 <div className="space-y-2">
-                  <h4 className="text-xs font-medium text-gray-400">Leaflets Per Page</h4>
+                  <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Leaflets Per Page</h4>
                   <div className="grid grid-cols-4 gap-2">
                     {[1, 2, 4, 6].map((num) => {
-                      const cols = num === 1 ? 1 : num === 2 ? 2 : num === 4 ? 2 : 2;
+                      const cols = num === 1 ? 1 : 2;
                       const rows = num === 1 ? 1 : num === 2 ? 1 : num === 4 ? 2 : 3;
                       return (
-                        <button key={num} onClick={() => setLayout(num, cols, rows, orientation)} className={cn("py-2 px-1 rounded-xl text-xs font-semibold", leafletsPerPage === num ? "bg-blue-600 text-white" : "bg-white/5 text-gray-400")}>
+                        <button key={num} onClick={() => setLayout(num, cols, rows, orientation)} className={cn("py-2.5 px-1 rounded-xl text-sm font-bold transition-all border", leafletsPerPage === num ? "bg-blue-500/20 border-blue-500/40 text-blue-300 shadow-[0_0_12px_rgba(59,130,246,0.15)]" : "bg-white/[0.03] border-white/10 text-gray-400 hover:bg-white/[0.06]")}>
                           {num}
                         </button>
                       );
                     })}
                   </div>
                 </div>
-                
-                {/* Orientation */}
+
                 <div className="space-y-2">
-                  <h4 className="text-xs font-medium text-gray-400">Orientation</h4>
+                  <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Orientation</h4>
                   <div className="grid grid-cols-2 gap-2">
-                    <button onClick={() => setLayout(leafletsPerPage, columns, rows, 'portrait')} className={cn("flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs", orientation === 'portrait' ? "bg-blue-600 text-white" : "bg-white/5 text-gray-400")}>
+                    <button onClick={() => setLayout(leafletsPerPage, columns, rows, 'portrait')} className={cn("flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs border transition-all", orientation === 'portrait' ? "bg-blue-500/20 border-blue-500/40 text-blue-300" : "bg-white/[0.03] border-white/10 text-gray-400 hover:bg-white/[0.06]")}>
                       <div className="w-3 h-4 border-2 border-current rounded-sm" /> Portrait
                     </button>
-                    <button onClick={() => setLayout(leafletsPerPage, columns, rows, 'landscape')} className={cn("flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs", orientation === 'landscape' ? "bg-blue-600 text-white" : "bg-white/5 text-gray-400")}>
+                    <button onClick={() => setLayout(leafletsPerPage, columns, rows, 'landscape')} className={cn("flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs border transition-all", orientation === 'landscape' ? "bg-blue-500/20 border-blue-500/40 text-blue-300" : "bg-white/[0.03] border-white/10 text-gray-400 hover:bg-white/[0.06]")}>
                       <div className="w-4 h-3 border-2 border-current rounded-sm" /> Landscape
                     </button>
                   </div>
                 </div>
 
-                {/* Binding Margin */}
                 {leafletsPerPage > 1 && (
                   <div className="space-y-2">
-                    <h4 className="text-xs font-medium text-gray-400">Binding Margin (left, pt)</h4>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="range" min={0} max={72} step={1}
-                        value={bindingMargin}
-                        onChange={e => setBindingMargin(Number(e.target.value))}
-                        className="flex-1 accent-blue-500"
-                      />
-                      <span className="text-xs text-gray-300 w-8 text-right">{bindingMargin}</span>
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Binding Margin</h4>
+                      <span className="text-xs font-mono text-blue-400">{bindingMargin}pt</span>
                     </div>
+                    <input
+                      type="range" min={0} max={72} step={1}
+                      value={bindingMargin}
+                      onChange={e => setBindingMargin(Number(e.target.value))}
+                      className="w-full accent-blue-500"
+                    />
                   </div>
                 )}
               </div>
@@ -2387,49 +2437,45 @@ export default function App() {
         </div>
 
         {/* Generate Button */}
-        <div className="p-4 border-t border-white/10 shrink-0">
-          <button 
+        <div className="p-4 border-t border-white/5 shrink-0">
+          <button
             onClick={handleGenerate}
             disabled={isGenerating || !templateUrl}
             className={cn(
-              "w-full font-semibold py-3.5 rounded-xl transition-all text-sm",
-              isGenerating ? "bg-gradient-to-r from-blue-600 to-purple-600" : "bg-blue-600 hover:bg-blue-500 disabled:opacity-50"
+              "w-full font-bold py-3.5 rounded-xl transition-all text-sm relative overflow-hidden group",
+              isGenerating
+                ? "bg-gradient-to-r from-blue-600 to-purple-600 opacity-80"
+                : "bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-cyan-500 disabled:opacity-40 disabled:cursor-not-allowed shadow-[0_0_24px_rgba(59,130,246,0.3)] hover:shadow-[0_0_32px_rgba(59,130,246,0.5)]"
             )}
           >
-            {isGenerating ? 'Generating...' : 'Generate PDF'}
+            <span className="relative z-10">{isGenerating ? 'Generating…' : 'Generate PDF'}</span>
           </button>
         </div>
       </div>
 
       {/* Center - Template Canvas */}
-      <div className="flex-1 min-w-0 flex flex-col bg-[#2a2a2a]">
-        <div className="h-14 bg-[#1a1a1a] border-b border-white/10 flex items-center justify-between px-4">
-          <span className="text-sm font-medium text-gray-300">Template Canvas</span>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500">{fields.length} fields</span>
-            <div className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-lg px-1 py-0.5">
-              <button
-                onClick={() => setZoomLevel(Math.max(0.5, zoomLevel - 0.25))}
-                className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 rounded transition-all text-sm font-bold"
-                title="Zoom out (−)"
-              >−</button>
-              <button
-                onClick={() => setZoomLevel(1)}
-                className="min-w-[46px] text-center text-xs font-mono text-gray-300 hover:text-white hover:bg-white/10 rounded px-1 py-0.5 transition-all"
-                title="Reset zoom"
-              >{Math.round(zoomLevel * 100)}%</button>
-              <button
-                onClick={() => setZoomLevel(Math.min(3, zoomLevel + 0.25))}
-                className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 rounded transition-all text-sm font-bold"
-                title="Zoom in (+)"
-              >+</button>
+      <div className="flex-1 min-w-0 flex flex-col bg-[#1c1c1c]">
+        <div className="h-14 border-b border-white/5 bg-[#191919] flex items-center justify-between px-5 shrink-0">
+          <span className="text-sm font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">Template Canvas</span>
+          <div className="flex items-center gap-3">
+            {fields.length > 0 && (
+              <span className="text-[10px] font-bold text-gray-500 bg-white/5 border border-white/5 px-2.5 py-1 rounded-lg">{fields.length} field{fields.length !== 1 ? 's' : ''}</span>
+            )}
+            <div className="flex items-center gap-0.5 bg-white/5 border border-white/10 rounded-xl px-1 py-0.5">
+              <button onClick={() => setZoomLevel(Math.max(0.5, zoomLevel - 0.25))} className="w-7 h-7 flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-all font-bold" title="Zoom out">−</button>
+              <button onClick={() => setZoomLevel(1)} className="min-w-[52px] text-center text-xs font-mono font-bold text-gray-300 hover:text-white hover:bg-white/10 rounded-lg px-1 py-1 transition-all" title="Reset zoom">{Math.round(zoomLevel * 100)}%</button>
+              <button onClick={() => setZoomLevel(Math.min(3, zoomLevel + 0.25))} className="w-7 h-7 flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-all font-bold" title="Zoom in">+</button>
             </div>
           </div>
         </div>
         <div
           className="flex-1 overflow-hidden"
           ref={canvasScrollRef}
-          style={{ cursor: isSpacePanning ? 'grabbing' : spaceDown ? 'grab' : undefined }}
+          style={{
+            cursor: isSpacePanning ? 'grabbing' : spaceDown ? 'grab' : undefined,
+            backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.06) 1px, transparent 1px)',
+            backgroundSize: '24px 24px',
+          }}
           onMouseDown={(e) => {
             if (!spaceDown) return;
             e.preventDefault();
@@ -2488,33 +2534,37 @@ export default function App() {
         </div>
       </div>
 
-      {/* Right Panel - PDF Preview */}
-      <div className="w-[400px] shrink-0 flex flex-col bg-[#f5f5f5] border-l border-gray-200">
-        <div className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4">
+      {/* Right Panel - PDF Preview (light output zone) */}
+      <div className="w-[400px] shrink-0 flex flex-col bg-[#f0f0f0] border-l border-gray-200">
+        <div className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-5 shrink-0">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-gray-700">{generatedPdfUrl ? 'Generated' : 'Preview'}</span>
-            {numPages > 0 && <span className="text-xs text-gray-500 bg-gray-100 px-2 rounded">{numPages} pages</span>}
+            <span className="text-sm font-semibold text-gray-800">Preview</span>
+            {numPages > 0 && (
+              <span className="text-xs text-gray-500 bg-gray-100 border border-gray-200 px-2 py-0.5 rounded-md font-medium">{numPages} page{numPages > 1 ? 's' : ''}</span>
+            )}
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={handlePrint} disabled={!generatedPdfUrl} className="p-2 hover:bg-gray-100 rounded-lg disabled:opacity-50"><Printer className="w-5 h-5 text-gray-600" /></button>
-            <a href={generatedPdfUrl || '#'} download="muzara-export.pdf" className={cn("p-2 hover:bg-gray-100 rounded-lg", !generatedPdfUrl && "opacity-50 pointer-events-none")}><Download className="w-5 h-5 text-gray-600" /></a>
+            <button onClick={handlePrint} disabled={!generatedPdfUrl} className="p-2 hover:bg-gray-100 rounded-xl text-gray-500 hover:text-gray-800 transition-all disabled:opacity-30 border border-transparent hover:border-gray-200" title="Print"><Printer className="w-4 h-4" /></button>
+            <a href={generatedPdfUrl || '#'} download="muzara-export.pdf" className={cn("p-2 rounded-xl border transition-all", generatedPdfUrl ? "bg-blue-50 border-blue-200 text-blue-600 hover:bg-blue-100" : "opacity-30 pointer-events-none bg-gray-50 border-gray-200 text-gray-400")} title="Download PDF"><Download className="w-4 h-4" /></a>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-4 bg-[#e8e8e8]">
+        <div className="flex-1 overflow-y-auto p-5 bg-[#e8e8e8]">
           {generatedPdfUrl && pdfDocument ? (
-            <div className="flex flex-col items-center pb-8 space-y-4">
+            <div className="flex flex-col items-center pb-8 space-y-5">
               {Array.from(new Array(numPages), (_, index) => (
-                <div key={index} className="bg-white shadow-lg rounded-sm p-2 w-full max-w-[350px]">
+                <div key={index} className="relative w-full shadow-[0_4px_24px_rgba(0,0,0,0.15)] rounded-lg overflow-hidden">
                   <PdfPage pdf={pdfDocument} pageNumber={index + 1} />
+                  <div className="absolute bottom-2 right-2 bg-black/40 backdrop-blur-sm text-white text-[10px] font-bold px-1.5 py-0.5 rounded">{index + 1}</div>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center h-full text-gray-500">
-              <div className="w-16 h-16 bg-white rounded-2xl shadow-lg flex items-center justify-center mb-4">
-                <FileText className="w-8 h-8 text-gray-400" />
+            <div className="flex flex-col items-center justify-center h-full text-center">
+              <div className="w-16 h-16 rounded-2xl bg-white shadow-sm border border-gray-200 flex items-center justify-center mb-4">
+                <FileText className="w-7 h-7 text-gray-400" />
               </div>
-              <p className="text-sm text-center">Click "Generate PDF" to see preview</p>
+              <p className="text-sm text-gray-500 font-medium">Click "Generate PDF"</p>
+              <p className="text-xs text-gray-400 mt-1">to see preview here</p>
             </div>
           )}
         </div>
@@ -2562,6 +2612,6 @@ function PdfPage({ pdf, pageNumber }: { pdf: any; pageNumber: number }) {
     };
   }, [pdf, pageNumber]);
 
-  if (error) return <div className="text-red-500 text-xs p-2">{error}</div>;
-  return <canvas ref={canvasRef} className="w-full" />;
+  if (error) return <div className="text-red-400 text-xs p-3 bg-red-500/10 border border-red-500/20 rounded-xl">{error}</div>;
+  return <canvas ref={canvasRef} className="w-full rounded-lg shadow-[0_20px_60px_rgba(0,0,0,0.8)] ring-1 ring-white/10 block" />;
 }

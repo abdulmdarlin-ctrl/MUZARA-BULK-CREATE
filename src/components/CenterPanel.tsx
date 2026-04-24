@@ -5,19 +5,59 @@ import { ZoomIn, ZoomOut, Maximize, ChevronLeft, ChevronRight, Move } from 'luci
 import * as pdfjsLib from 'pdfjs-dist';
 import { clsx } from 'clsx';
 
-// Set worker source for pdf.js
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+// Set worker source for pdf.js — use local bundled worker to avoid CDN/CORS issues
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 export function CenterPanel() {
   const { 
     templateUrl, templateFile, fields, updateField, setSelectedFieldId, 
     currentPage, setCurrentPage, extractedImages, setCanvasDimensions, 
-    canvasDimensions, templateBlackAndWhite, interactionMode 
+    canvasDimensions, templateBlackAndWhite, interactionMode,
+    csvData
   } = useStore();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [canvas, setCanvas] = useState<fabric.Canvas | null>(null);
   const [zoom, setZoom] = useState(1);
   const [error, setError] = useState<string | null>(null);
+
+  // Debug helper: resolve image data from CSV + extractedImages with logging
+  const findImageData = (field: any, images: Record<string, ArrayBuffer>, rows: any[]): ArrayBuffer | null => {
+    const firstRow = rows?.[0];
+    // 1. Try field.dataKey from first CSV row
+    let path = (field.dataKey && firstRow?.[field.dataKey]) || '';
+    // 2. Fallback to field.value
+    if (!path) path = field.value || '';
+    if (!path) {
+      console.log(`[Canvas] Image field "${field.label}" (id=${field.id}): no path from dataKey="${field.dataKey}" or value`);
+      return null;
+    }
+
+    const key = path.split(/[\\/]/).pop()?.toLowerCase() || '';
+    const lowerPath = path.toLowerCase();
+    const noExt = key.replace(/\.[^/.]+$/, '');
+
+    // Try multiple key strategies
+    const strategies = [
+      { k: key, desc: 'filename' },
+      { k: lowerPath, desc: 'full path lowercase' },
+      { k: `photos/${key}`, desc: 'photos/filename' },
+      { k: `photos/${lowerPath}`, desc: 'photos/fullpath' },
+      { k: noExt, desc: 'no extension' },
+      { k: key.replace(/\.(jpg|jpeg)$/, '.jpg'), desc: 'normalized jpg' },
+      { k: key.replace(/\.(jpg|jpeg)$/, '.jpeg'), desc: 'normalized jpeg' },
+    ];
+
+    for (const s of strategies) {
+      if (images[s.k]) {
+        console.log(`[Canvas] Image field "${field.label}": FOUND via ${s.k} (${s.desc})`);
+        return images[s.k];
+      }
+    }
+
+    console.log(`[Canvas] Image field "${field.label}": NOT FOUND. Tried path="${path}", keys=${Object.keys(images).slice(0, 10).join(', ')}${Object.keys(images).length > 10 ? '...' : ''}`);
+    return null;
+  };
 
   // Helper function to create image placeholder
   const createImagePlaceholder = (canvas: fabric.Canvas, field: any, isSelectable: boolean) => {
@@ -34,7 +74,8 @@ export function CenterPanel() {
       evented: isSelectable,
     } as any);
     
-    const label = new fabric.Text('📷 Photo', {
+    const zoneLabel = field.zoneId ? `📷 ${field.zoneId}` : '📷 Photo';
+    const label = new fabric.Text(zoneLabel, {
       left: field.x + (field.width || 100) / 2,
       top: field.y + (field.height || 120) / 2,
       fontSize: 12,
@@ -336,10 +377,7 @@ export function CenterPanel() {
         const isSelectable = interactionMode !== 'place_point';
 
         if (field.type === 'image') {
-          // Try to get image from extracted images first
-          const imagePath = field.value || '';
-          const imageKey = imagePath.split(/[\\/]/).pop()?.toLowerCase() || '';
-          const imageData = extractedImages[imageKey] || extractedImages[imagePath.toLowerCase()];
+          const imageData = findImageData(field, extractedImages, csvData || []);
           
           if (imageData) {
             // If we have the image data, create an image element
@@ -399,7 +437,7 @@ export function CenterPanel() {
     };
 
     renderCanvas();
-  }, [canvas, templateUrl, templateFile, templateBlackAndWhite]); // ONLY re-render template when these change
+  }, [canvas, templateUrl, templateFile, templateBlackAndWhite, extractedImages, csvData]);
 
   // Update specific field properties without full re-render
   useEffect(() => {
@@ -413,28 +451,9 @@ export function CenterPanel() {
     
     // If fontSize changed, force full re-render to eliminate ghost text
     if (fontSizeChanged) {
-      // Get all objects before clearing
+      // Remove ONLY field objects (keep template image intact)
       const allObjects = canvas.getObjects();
-      const templateImg = allObjects.find((o: any) => !o.id) as fabric.Image | undefined;
-      
-      // Remove all objects individually to ensure cleanup
-      allObjects.forEach(obj => canvas.remove(obj));
-      
-      // Force canvas disposal of any cached rendering
-      canvas.clear();
-      canvas.backgroundColor = '#ffffff';
-      
-      // Clear the underlying HTML5 canvas context directly
-      const context = canvas.getElement().getContext('2d');
-      if (context) {
-        context.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
-      }
-      
-      // Re-add template image
-      if (templateImg) {
-        canvas.add(templateImg);
-        canvas.sendObjectToBack(templateImg);
-      }
+      allObjects.filter((o: any) => o.id).forEach(obj => canvas.remove(obj));
       
       // Re-create all field objects fresh with caching disabled
       fields.forEach((field) => {
@@ -442,10 +461,7 @@ export function CenterPanel() {
         const isSelectable = interactionMode !== 'place_point';
 
         if (field.type === 'image') {
-          // For image fields, try to show actual image if available
-          const imagePath = field.value || '';
-          const imageKey = imagePath.split(/[\\/]/).pop()?.toLowerCase() || '';
-          const imageData = extractedImages[imageKey] || extractedImages[imagePath.toLowerCase()];
+          const imageData = findImageData(field, extractedImages, csvData || []);
           
           if (imageData) {
             const blob = new Blob([imageData]);
@@ -504,12 +520,11 @@ export function CenterPanel() {
       return;
     }
     
-    // For other property changes, just update
+    // For other property changes, just update visual/text properties
+    // NOTE: Do NOT update left/top here — positions are managed by drag + object:modified
     fields.forEach(field => {
       const obj = canvas.getObjects().find((o: any) => o.id === field.id);
       if (obj) {
-        if (obj.left !== field.x) obj.set('left', field.x);
-        if (obj.top !== field.y) obj.set('top', field.y);
         if (field.type !== 'image' && (obj as any).fontFamily !== field.fontFamily) (obj as any).set('fontFamily', field.fontFamily);
         if (field.type !== 'image' && (obj as any).fill !== field.color) (obj as any).set('fill', field.color);
         if (field.type !== 'image' && ((obj as any).fontWeight === 'bold') !== field.bold) (obj as any).set('fontWeight', field.bold ? 'bold' : 'normal');
@@ -522,9 +537,7 @@ export function CenterPanel() {
         const isSelectable = interactionMode !== 'place_point';
         
         if (field.type === 'image') {
-          const imagePath = field.value || '';
-          const imageKey = imagePath.split(/[\\/]/).pop()?.toLowerCase() || '';
-          const imageData = extractedImages[imageKey] || extractedImages[imagePath.toLowerCase()];
+          const imageData = findImageData(field, extractedImages, csvData || []);
           
           if (imageData) {
             const blob = new Blob([imageData]);
